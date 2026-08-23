@@ -1,17 +1,19 @@
 """Small local ComfyUI API client.
 
-No cloud services are used. The client talks only to a locally running
-ComfyUI instance and leaves model-specific workflow logic to the workflow layer.
+The client talks only to a local ComfyUI server. It handles queueing, status,
+input-image upload and copying generated files back into OfflineMedia output.
 """
 
 from __future__ import annotations
 
 import json
+import mimetypes
 import time
 import uuid
 from pathlib import Path
 from typing import Any
 from urllib.error import URLError
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.core.generation import GenerationRequest, GenerationResult
@@ -55,6 +57,29 @@ class ComfyUIClient:
             raise RuntimeError(f"ComfyUI rejected the workflow: {data}")
         return str(data["prompt_id"])
 
+    def upload_image(self, path: Path, overwrite: bool = False) -> str:
+        boundary = f"----OfflineMedia{uuid.uuid4().hex}"
+        filename = path.name
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        file_bytes = path.read_bytes()
+        parts = [
+            f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n".encode(),
+            file_bytes,
+            f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\n{str(overwrite).lower()}\r\n".encode(),
+            f"--{boundary}--\r\n".encode(),
+        ]
+        request = Request(
+            f"{self.base_url}/upload/image",
+            data=b"".join(parts),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            method="POST",
+        )
+        with urlopen(request, timeout=max(self.timeout, 30.0)) as response:
+            result = json.loads(response.read().decode("utf-8"))
+        if not result.get("name"):
+            raise RuntimeError(f"ComfyUI image upload failed: {result}")
+        return str(result["name"])
+
     def get_history(self, prompt_id: str) -> dict[str, Any]:
         return self._request_json(f"/history/{prompt_id}")
 
@@ -65,12 +90,7 @@ class ComfyUIClient:
         except (OSError, URLError, ValueError):
             return False
 
-    def wait_for_completion(
-        self,
-        prompt_id: str,
-        poll_interval: float = 0.5,
-        timeout: float = 3600,
-    ) -> dict[str, Any]:
+    def wait_for_completion(self, prompt_id: str, poll_interval: float = 0.5, timeout: float = 3600) -> dict[str, Any]:
         started = time.monotonic()
         while time.monotonic() - started < timeout:
             history = self.get_history(prompt_id)
@@ -83,16 +103,28 @@ class ComfyUIClient:
             time.sleep(poll_interval)
         raise TimeoutError(f"ComfyUI job {prompt_id} timed out after {timeout:.0f}s")
 
+    def download_output(self, item: dict[str, Any], destination: Path) -> Path:
+        params = {"filename": item.get("filename", ""), "type": item.get("type", "output")}
+        if item.get("subfolder"):
+            params["subfolder"] = item["subfolder"]
+        url = f"{self.base_url}/view?{urlencode(params)}"
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        request = Request(url, method="GET")
+        with urlopen(request, timeout=max(self.timeout, 30.0)) as response:
+            destination.write_bytes(response.read())
+        return destination
+
     @staticmethod
-    def extract_outputs(history: dict[str, Any]) -> list[Path]:
-        outputs: list[Path] = []
+    def output_items(history: dict[str, Any]) -> list[dict[str, Any]]:
+        items: list[dict[str, Any]] = []
         for node in history.get("outputs", {}).values():
             for key in ("images", "gifs", "videos", "audio"):
-                for item in node.get(key, []) or []:
-                    filename = item.get("filename")
-                    if filename:
-                        outputs.append(Path(filename))
-        return outputs
+                items.extend(node.get(key, []) or [])
+        return [item for item in items if item.get("filename")]
+
+    @staticmethod
+    def extract_outputs(history: dict[str, Any]) -> list[Path]:
+        return [Path(item["filename"]) for item in ComfyUIClient.output_items(history)]
 
     def load_workflow(self, path: Path) -> dict[str, Any]:
         with path.open("r", encoding="utf-8") as handle:

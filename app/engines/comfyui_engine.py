@@ -12,9 +12,10 @@ from app.engines.workflow import Workflow, WorkflowError
 class ComfyUIEngine:
     """High-level adapter around the local ComfyUI HTTP client."""
 
-    def __init__(self, client: ComfyUIClient, workflow_dir: Path) -> None:
+    def __init__(self, client: ComfyUIClient, workflow_dir: Path, output_dir: Path | None = None) -> None:
         self.client = client
         self.workflow_dir = workflow_dir
+        self.output_dir = output_dir or workflow_dir.parent / "outputs"
 
     def is_available(self) -> bool:
         return self.client.is_available()
@@ -38,6 +39,9 @@ class ComfyUIEngine:
             workflow_path = self.workflow_for(request)
             workflow = Workflow.load(workflow_path)
             bindings = request.extra.get("bindings", {})
+            if not isinstance(bindings, dict):
+                bindings = {}
+
             values = {
                 "prompt": request.prompt,
                 "negative_prompt": request.negative_prompt,
@@ -47,16 +51,21 @@ class ComfyUIEngine:
                 "fps": request.fps,
                 "seed": request.seed,
             }
-            if isinstance(bindings, dict):
-                workflow.apply_bindings(values, bindings)
-            if request.extra.get("input_image"):
-                workflow.apply_bindings(
-                    {"image": request.extra["input_image"]},
-                    bindings if isinstance(bindings, dict) else {},
-                )
+
+            if request.input_images and request.generation_type.value == "image_to_video":
+                values["image"] = self.client.upload_image(request.input_images[0])
+
+            workflow.apply_bindings(values, bindings)
             job_id = self.client.queue_prompt(workflow.to_dict())
             history = self.client.wait_for_completion(job_id)
-            outputs = self.client.extract_outputs(history)
+
+            project_output = self.output_dir / job_id
+            outputs: list[Path] = []
+            for index, item in enumerate(self.client.output_items(history), start=1):
+                suffix = Path(item["filename"]).suffix or ".bin"
+                destination = project_output / f"output_{index:03d}{suffix}"
+                outputs.append(self.client.download_output(item, destination))
+
             return GenerationResult(True, outputs, job_id=job_id)
         except Exception as exc:
             return GenerationResult(False, error=str(exc))
