@@ -2,8 +2,15 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import os
+import subprocess
+from pathlib import Path
+
+from PySide6.QtCore import QObject, Qt, QThread, Signal, Slot, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
+    QComboBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -16,27 +23,46 @@ from PySide6.QtWidgets import (
     QStackedWidget,
     QVBoxLayout,
     QWidget,
-    QFileDialog,
 )
 
+from app.core.generation import GenerationRequest, GenerationType
 from app.core.hardware import describe
+from app.core.model_manager import ModelManager
 from app.core.paths import ensure_directories
-from app.engines.comfyui_client import ComfyUIClient
+from app.engines.manager import EngineManager
 from app.video.ffmpeg import FFmpeg
 
 
+class GenerationWorker(QObject):
+    """Runs a generation request away from the Qt GUI thread."""
+
+    finished = Signal(object)
+
+    def __init__(self, engine: EngineManager, request: GenerationRequest) -> None:
+        super().__init__()
+        self.engine = engine
+        self.request = request
+
+    @Slot()
+    def run(self) -> None:
+        self.finished.emit(self.engine.generate(self.request))
+
+
 class MainWindow(QMainWindow):
-    """Primary application shell with the first generation controls."""
+    """Primary OfflineMedia desktop application."""
 
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle("OfflineMedia")
-        self.resize(1280, 800)
-        self.setMinimumSize(1000, 650)
+        self.resize(1280, 820)
+        self.setMinimumSize(1050, 680)
         self.paths = ensure_directories()
-        self.comfy = ComfyUIClient()
+        self.engines = EngineManager()
+        self.models = ModelManager(self.paths["models"])
         self.ffmpeg = FFmpeg()
         self._pages: dict[str, QWidget] = {}
+        self._generation_thread: QThread | None = None
+        self._generation_worker: GenerationWorker | None = None
         self._build_ui()
         self._refresh_status()
 
@@ -48,41 +74,43 @@ class MainWindow(QMainWindow):
 
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(230)
-        side_layout = QVBoxLayout(sidebar)
-        side_layout.setContentsMargins(20, 24, 20, 20)
-        side_layout.setSpacing(8)
+        sidebar.setFixedWidth(235)
+        side = QVBoxLayout(sidebar)
+        side.setContentsMargins(20, 24, 20, 20)
+        side.setSpacing(8)
 
-        title = QLabel("OfflineMedia")
-        title.setObjectName("brand")
+        brand = QLabel("OfflineMedia")
+        brand.setObjectName("brand")
         subtitle = QLabel("LOCAL VIDEO STUDIO")
         subtitle.setObjectName("subtitle")
-        side_layout.addWidget(title)
-        side_layout.addWidget(subtitle)
-        side_layout.addSpacing(24)
+        side.addWidget(brand)
+        side.addWidget(subtitle)
+        side.addSpacing(24)
 
         for key, label in (
             ("home", "Home"),
             ("text", "Text → Video"),
             ("image", "Image → Video"),
             ("sequence", "Image Sequence"),
+            ("models", "Models"),
             ("projects", "Projects"),
         ):
             button = QPushButton(label)
             button.setCursor(Qt.PointingHandCursor)
             button.clicked.connect(lambda checked=False, page=key: self._show_page(page))
-            side_layout.addWidget(button)
+            side.addWidget(button)
 
-        side_layout.addStretch()
+        side.addStretch()
         settings = QPushButton("Settings")
         settings.clicked.connect(lambda: self._show_page("settings"))
-        side_layout.addWidget(settings)
+        side.addWidget(settings)
 
         self.stack = QStackedWidget()
         self._add_page("home", self._home_page())
-        self._add_page("text", self._generator_page("Text → Video", image_mode=False))
-        self._add_page("image", self._generator_page("Image → Video", image_mode=True))
+        self._add_page("text", self._generator_page(GenerationType.TEXT_TO_VIDEO, "Text → Video", False))
+        self._add_page("image", self._generator_page(GenerationType.IMAGE_TO_VIDEO, "Image → Video", True))
         self._add_page("sequence", self._sequence_page())
+        self._add_page("models", self._models_page())
         self._add_page("projects", self._projects_page())
         self._add_page("settings", self._settings_page())
 
@@ -97,6 +125,8 @@ class MainWindow(QMainWindow):
 
     def _show_page(self, key: str) -> None:
         self.stack.setCurrentWidget(self._pages[key])
+        if key == "models":
+            self._refresh_models()
 
     def _home_page(self) -> QWidget:
         page = QWidget()
@@ -111,82 +141,175 @@ class MainWindow(QMainWindow):
         cards = [
             ("Text → Video", "Generate a local AI video from a prompt.", "text"),
             ("Image → Video", "Animate a still image with a local model.", "image"),
-            ("Image Sequence", "Build a video from multiple images.", "sequence"),
+            ("Image Sequence", "Turn multiple images into a video.", "sequence"),
         ]
         for index, (name, description, target) in enumerate(cards):
             card = QFrame()
             card.setObjectName("card")
             card_layout = QVBoxLayout(card)
-            card_title = QLabel(name)
-            card_title.setObjectName("card_title")
+            heading = QLabel(name)
+            heading.setObjectName("card_title")
             desc = QLabel(description)
             desc.setWordWrap(True)
             open_button = QPushButton("Open")
             open_button.clicked.connect(lambda checked=False, page=target: self._show_page(page))
-            card_layout.addWidget(card_title)
+            card_layout.addWidget(heading)
             card_layout.addWidget(desc)
             card_layout.addStretch()
             card_layout.addWidget(open_button)
             grid.addWidget(card, 0, index)
         layout.addLayout(grid)
         layout.addStretch()
-        self.status_label = QLabel("Checking local engines…")
+        self.status_label = QLabel()
         self.status_label.setObjectName("status")
         layout.addWidget(self.status_label)
         return page
 
-    def _generator_page(self, title_text: str, image_mode: bool) -> QWidget:
+    def _generator_page(self, generation_type: GenerationType, title_text: str, image_mode: bool) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 28, 32, 28)
+
         title = QLabel(title_text)
         title.setObjectName("page_title")
         layout.addWidget(title)
 
+        image_path = None
         if image_mode:
             row = QHBoxLayout()
-            self.image_path = QLineEdit()
-            self.image_path.setPlaceholderText("Select an input image…")
+            image_path = QLineEdit()
+            image_path.setPlaceholderText("Select an input image…")
             browse = QPushButton("Browse")
-            browse.clicked.connect(self._choose_image)
-            row.addWidget(self.image_path)
+            browse.clicked.connect(lambda: self._choose_image(image_path))
+            row.addWidget(image_path, 1)
             row.addWidget(browse)
             layout.addLayout(row)
 
-        self.prompt = QPlainTextEdit()
-        self.prompt.setPlaceholderText("Describe the video you want to generate…")
-        self.prompt.setMinimumHeight(160)
-        layout.addWidget(self.prompt)
+        prompt = QPlainTextEdit()
+        prompt.setPlaceholderText("Describe the video you want to generate…")
+        prompt.setMinimumHeight(170)
+        layout.addWidget(prompt)
 
         controls = QHBoxLayout()
         controls.addWidget(QLabel("Width"))
-        width = QSpinBox()
-        width.setRange(256, 2048)
-        width.setSingleStep(64)
-        width.setValue(512)
+        width = self._spin(256, 2048, 512, 64)
         controls.addWidget(width)
         controls.addWidget(QLabel("Height"))
-        height = QSpinBox()
-        height.setRange(256, 2048)
-        height.setSingleStep(64)
-        height.setValue(512)
+        height = self._spin(256, 2048, 512, 64)
         controls.addWidget(height)
         controls.addWidget(QLabel("Frames"))
-        frames = QSpinBox()
-        frames.setRange(8, 200)
-        frames.setValue(49)
+        frames = self._spin(8, 200, 49, 1)
         controls.addWidget(frames)
+        controls.addWidget(QLabel("FPS"))
+        fps = self._spin(1, 60, 8, 1)
+        controls.addWidget(fps)
         controls.addStretch()
         layout.addLayout(controls)
 
-        self.generate_status = QLabel("Ready")
+        model = QComboBox()
+        model.addItem("Workflow-selected model")
+        model.setToolTip("Model selection is controlled by the installed ComfyUI workflow for now.")
+        layout.addWidget(model)
+
+        status = QLabel("Ready")
+        status.setObjectName("generation_status")
         generate = QPushButton("Generate Video")
         generate.setObjectName("primary")
-        generate.clicked.connect(lambda: self._generation_requested(title_text))
-        layout.addWidget(self.generate_status)
+        generate.clicked.connect(
+            lambda: self._start_generation(
+                generation_type,
+                prompt,
+                width,
+                height,
+                frames,
+                fps,
+                image_path,
+                status,
+            )
+        )
+        layout.addWidget(status)
         layout.addWidget(generate)
         layout.addStretch()
         return page
+
+    @staticmethod
+    def _spin(minimum: int, maximum: int, value: int, step: int) -> QSpinBox:
+        box = QSpinBox()
+        box.setRange(minimum, maximum)
+        box.setSingleStep(step)
+        box.setValue(value)
+        return box
+
+    def _choose_image(self, target: QLineEdit) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Select image",
+            "",
+            "Images (*.png *.jpg *.jpeg *.webp *.bmp)",
+        )
+        if path:
+            target.setText(path)
+
+    def _start_generation(
+        self,
+        generation_type: GenerationType,
+        prompt: QPlainTextEdit,
+        width: QSpinBox,
+        height: QSpinBox,
+        frames: QSpinBox,
+        fps: QSpinBox,
+        image_path: QLineEdit | None,
+        status: QLabel,
+    ) -> None:
+        text = prompt.toPlainText().strip()
+        if not text:
+            status.setText("Enter a prompt first.")
+            return
+        if not self.engines.any_available():
+            status.setText("ComfyUI is not running. Start the local ComfyUI server first.")
+            return
+
+        inputs: list[Path] = []
+        if image_path is not None:
+            path = Path(image_path.text().strip())
+            if not path.is_file():
+                status.setText("Select a valid input image.")
+                return
+            inputs.append(path)
+
+        request = GenerationRequest(
+            generation_type=generation_type,
+            prompt=text,
+            input_images=inputs,
+            width=width.value(),
+            height=height.value(),
+            frames=frames.value(),
+            fps=fps.value(),
+            output_dir=self.paths["outputs"],
+        )
+        status.setText("Queued… generating locally. The UI will remain responsive.")
+        self._generation_thread = QThread(self)
+        self._generation_worker = GenerationWorker(self.engines, request)
+        self._generation_worker.moveToThread(self._generation_thread)
+        self._generation_thread.started.connect(self._generation_worker.run)
+        self._generation_worker.finished.connect(lambda result: self._generation_finished(result, status))
+        self._generation_worker.finished.connect(self._generation_thread.quit)
+        self._generation_thread.finished.connect(self._generation_thread.deleteLater)
+        self._generation_thread.finished.connect(self._generation_worker.deleteLater)
+        self._generation_thread.start()
+
+    def _generation_finished(self, result, status: QLabel) -> None:
+        if result.success:
+            if result.output_files:
+                output = result.output_files[0]
+                status.setText(f"Finished: {output}")
+                self._open_path(output.parent)
+            else:
+                status.setText(f"Finished. Job: {result.job_id}")
+        else:
+            status.setText(f"Generation failed: {result.error}")
+        self._generation_worker = None
+        self._generation_thread = None
 
     def _sequence_page(self) -> QWidget:
         page = QWidget()
@@ -195,6 +318,7 @@ class MainWindow(QMainWindow):
         title = QLabel("Image Sequence")
         title.setObjectName("page_title")
         layout.addWidget(title)
+        self.sequence_paths: list[str] = []
         self.sequence_label = QLabel("No images selected")
         layout.addWidget(self.sequence_label)
         choose = QPushButton("Choose Images")
@@ -203,6 +327,40 @@ class MainWindow(QMainWindow):
         layout.addStretch()
         return page
 
+    def _choose_sequence(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Select images", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)"
+        )
+        self.sequence_paths = paths
+        self.sequence_label.setText(f"{len(paths)} images selected") if paths else self.sequence_label.setText("No images selected")
+
+    def _models_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(32, 28, 32, 28)
+        title = QLabel("Local Models")
+        title.setObjectName("page_title")
+        layout.addWidget(title)
+        self.models_label = QLabel()
+        self.models_label.setWordWrap(True)
+        layout.addWidget(self.models_label)
+        refresh = QPushButton("Rescan Models")
+        refresh.clicked.connect(self._refresh_models)
+        layout.addWidget(refresh)
+        layout.addStretch()
+        self._refresh_models()
+        return page
+
+    def _refresh_models(self) -> None:
+        if not hasattr(self, "models_label"):
+            return
+        models = self.models.scan()
+        if not models:
+            self.models_label.setText(f"No local model files found.\n\nModel directory:\n{self.paths['models']}")
+            return
+        lines = [f"{model.name}  •  {ModelManager.format_size(model.size_bytes)}  •  {model.category}" for model in models]
+        self.models_label.setText("\n".join(lines))
+
     def _projects_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -210,7 +368,10 @@ class MainWindow(QMainWindow):
         title = QLabel("Projects")
         title.setObjectName("page_title")
         layout.addWidget(title)
-        layout.addWidget(QLabel(f"Project storage: {self.paths['projects']}"))
+        layout.addWidget(QLabel(f"Outputs: {self.paths['outputs']}"))
+        open_button = QPushButton("Open Output Folder")
+        open_button.clicked.connect(lambda: self._open_path(self.paths["outputs"]))
+        layout.addWidget(open_button)
         layout.addStretch()
         return page
 
@@ -221,37 +382,26 @@ class MainWindow(QMainWindow):
         title = QLabel("Settings")
         title.setObjectName("page_title")
         layout.addWidget(title)
-        info = describe()
-        for key, value in info.items():
+        for key, value in describe().items():
             layout.addWidget(QLabel(f"{key.upper()}: {value}"))
-        layout.addWidget(QLabel(f"ComfyUI: {self.comfy.base_url}"))
+        layout.addWidget(QLabel(f"ComfyUI: {self.engines.comfyui.base_url}"))
         layout.addWidget(QLabel(f"FFmpeg: {'available' if self.ffmpeg.available else 'not found'}"))
+        layout.addWidget(QLabel(f"Workflow directory: {self.paths['workflows']}"))
         layout.addStretch()
         return page
 
-    def _choose_image(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Select image", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
-        if path:
-            self.image_path.setText(path)
-
-    def _choose_sequence(self) -> None:
-        paths, _ = QFileDialog.getOpenFileNames(self, "Select images", "", "Images (*.png *.jpg *.jpeg *.webp *.bmp)")
-        self.sequence_label.setText(f"{len(paths)} images selected" if paths else "No images selected")
-
-    def _generation_requested(self, mode: str) -> None:
-        prompt = self.prompt.toPlainText().strip()
-        if not prompt:
-            self.generate_status.setText("Enter a prompt first.")
-            return
-        if not self.comfy.is_available():
-            self.generate_status.setText("ComfyUI is not running. Connect the local engine to enable generation.")
-            return
-        self.generate_status.setText(f"{mode} request accepted. Workflow integration is next.")
-
     def _refresh_status(self) -> None:
-        comfy = "connected" if self.comfy.is_available() else "not connected"
+        comfy = "connected" if self.engines.any_available() else "not connected"
         ffmpeg = "available" if self.ffmpeg.available else "not installed"
         self.status_label.setText(f"ComfyUI: {comfy}  •  FFmpeg: {ffmpeg}")
+
+    @staticmethod
+    def _open_path(path: Path) -> None:
+        path.mkdir(parents=True, exist_ok=True)
+        if os.name == "nt":
+            subprocess.Popen(["explorer", str(path)])
+        else:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
 
     def _apply_style(self) -> None:
         self.setStyleSheet(
@@ -268,7 +418,7 @@ class MainWindow(QMainWindow):
             #card { background: #191d24; border: 1px solid #292e38; border-radius: 12px; min-height: 170px; }
             #card_title { color: #f2f4f8; font-size: 17px; font-weight: 600; }
             QLabel { color: #aab1bd; font-size: 13px; }
-            QPlainTextEdit, QLineEdit, QSpinBox { background: #191d24; color: #e6e9ef; border: 1px solid #303641; border-radius: 8px; padding: 8px; }
-            #status { color: #707784; padding-top: 12px; }
+            QPlainTextEdit, QLineEdit, QSpinBox, QComboBox { background: #191d24; color: #e6e9ef; border: 1px solid #303641; border-radius: 8px; padding: 8px; }
+            #status, #generation_status { color: #707784; padding-top: 12px; }
             """
         )

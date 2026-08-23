@@ -1,4 +1,4 @@
-"""FFmpeg discovery and lightweight media operations."""
+"""FFmpeg discovery and local media operations."""
 
 from __future__ import annotations
 
@@ -27,25 +27,53 @@ class FFmpeg:
             timeout=5,
             check=False,
         )
-        first_line = result.stdout.splitlines()
-        return first_line[0] if first_line else None
+        return result.stdout.splitlines()[0] if result.stdout.splitlines() else None
 
     def concat(self, inputs: list[Path], output: Path) -> None:
-        """Concatenate compatible media files using FFmpeg's concat demuxer."""
         if not self.executable:
             raise RuntimeError("FFmpeg was not found on this computer")
         if not inputs:
             raise ValueError("At least one input file is required")
-
         output.parent.mkdir(parents=True, exist_ok=True)
         list_file = output.parent / ".offline_media_concat.txt"
         try:
-            list_file.write_text(
-                "\n".join(f"file '{path.resolve().as_posix().replace(chr(39), chr(39) + chr(39))}'" for path in inputs),
-                encoding="utf-8",
-            )
+            lines = []
+            for path in inputs:
+                escaped = path.resolve().as_posix().replace("'", "'\\''")
+                lines.append(f"file '{escaped}'")
+            list_file.write_text("\n".join(lines), encoding="utf-8")
             subprocess.run(
                 [self.executable, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file), "-c", "copy", str(output)],
+                check=True,
+            )
+        finally:
+            list_file.unlink(missing_ok=True)
+
+    def images_to_video(self, inputs: list[Path], output: Path, fps: int = 2, seconds_per_image: float = 2.0) -> None:
+        """Create a simple slideshow from images using FFmpeg's concat filter."""
+        if not self.executable:
+            raise RuntimeError("FFmpeg was not found on this computer")
+        if not inputs:
+            raise ValueError("At least one image is required")
+        if fps <= 0 or seconds_per_image <= 0:
+            raise ValueError("fps and seconds_per_image must be positive")
+
+        output.parent.mkdir(parents=True, exist_ok=True)
+        list_file = output.parent / ".offline_media_images.txt"
+        try:
+            duration = f"{seconds_per_image:.3f}"
+            lines = []
+            for path in inputs:
+                escaped = path.resolve().as_posix().replace("'", "'\\''")
+                lines.extend([f"file '{escaped}'", f"duration {duration}"])
+            escaped_last = inputs[-1].resolve().as_posix().replace("'", "'\\''")
+            lines.append(f"file '{escaped_last}'")
+            list_file.write_text("\n".join(lines), encoding="utf-8")
+            subprocess.run(
+                [
+                    self.executable, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
+                    "-vf", f"fps={fps},format=yuv420p", "-movflags", "+faststart", str(output),
+                ],
                 check=True,
             )
         finally:
