@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QFrame,
@@ -12,8 +10,8 @@ from PySide6.QtWidgets import (
     QLabel,
     QLineEdit,
     QMainWindow,
-    QPushButton,
     QPlainTextEdit,
+    QPushButton,
     QSpinBox,
     QStackedWidget,
     QVBoxLayout,
@@ -48,14 +46,17 @@ class MainWindow(QMainWindow):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.setSpacing(0)
 
-        sidebar = QFrame(objectName="sidebar")
+        sidebar = QFrame()
+        sidebar.setObjectName("sidebar")
         sidebar.setFixedWidth(230)
         side_layout = QVBoxLayout(sidebar)
         side_layout.setContentsMargins(20, 24, 20, 20)
         side_layout.setSpacing(8)
 
-        title = QLabel("OfflineMedia", objectName="brand")
-        subtitle = QLabel("LOCAL VIDEO STUDIO", objectName="subtitle")
+        title = QLabel("OfflineMedia")
+        title.setObjectName("brand")
+        subtitle = QLabel("LOCAL VIDEO STUDIO")
+        subtitle.setObjectName("subtitle")
         side_layout.addWidget(title)
         side_layout.addWidget(subtitle)
         side_layout.addSpacing(24)
@@ -101,7 +102,8 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 28, 32, 28)
-        title = QLabel("Create", objectName="page_title")
+        title = QLabel("Create")
+        title.setObjectName("page_title")
         layout.addWidget(title)
 
         grid = QGridLayout()
@@ -112,9 +114,11 @@ class MainWindow(QMainWindow):
             ("Image Sequence", "Build a video from multiple images.", "sequence"),
         ]
         for index, (name, description, target) in enumerate(cards):
-            card = QFrame(objectName="card")
+            card = QFrame()
+            card.setObjectName("card")
             card_layout = QVBoxLayout(card)
-            card_title = QLabel(name, objectName="card_title")
+            card_title = QLabel(name)
+            card_title.setObjectName("card_title")
             desc = QLabel(description)
             desc.setWordWrap(True)
             open_button = QPushButton("Open")
@@ -126,7 +130,8 @@ class MainWindow(QMainWindow):
             grid.addWidget(card, 0, index)
         layout.addLayout(grid)
         layout.addStretch()
-        self.status_label = QLabel("Checking local engines…", objectName="status")
+        self.status_label = QLabel("Checking local engines…")
+        self.status_label.setObjectName("status")
         layout.addWidget(self.status_label)
         return page
 
@@ -134,7 +139,9 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 28, 32, 28)
-        layout.addWidget(QLabel(title_text, objectName="page_title"))
+        title = QLabel(title_text)
+        title.setObjectName("page_title")
+        layout.addWidget(title)
 
         if image_mode:
             row = QHBoxLayout()
@@ -185,7 +192,9 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 28, 32, 28)
-        layout.addWidget(QLabel("Image Sequence", objectName="page_title"))
+        title = QLabel("Image Sequence")
+        title.setObjectName("page_title")
+        layout.addWidget(title)
         self.sequence_label = QLabel("No images selected")
         layout.addWidget(self.sequence_label)
         choose = QPushButton("Choose Images")
@@ -198,7 +207,9 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 28, 32, 28)
-        layout.addWidget(QLabel("Projects", objectName="page_title"))
+        title = QLabel("Projects")
+        title.setObjectName("page_title")
+        layout.addWidget(title)
         layout.addWidget(QLabel(f"Project storage: {self.paths['projects']}"))
         layout.addStretch()
         return page
@@ -207,7 +218,9 @@ class MainWindow(QMainWindow):
         page = QWidget()
         layout = QVBoxLayout(page)
         layout.setContentsMargins(32, 28, 32, 28)
-        layout.addWidget(QLabel("Settings", objectName="page_title"))
+        title = QLabel("Settings")
+        title.setObjectName("page_title")
+        layout.addWidget(title)
         info = describe()
         for key, value in info.items():
             layout.addWidget(QLabel(f"{key.upper()}: {value}"))
@@ -231,7 +244,7 @@ class MainWindow(QMainWindow):
             self.generate_status.setText("Enter a prompt first.")
             return
         if not self.comfy.is_available():
-            self.generate_status.setText("ComfyUI is not running. Generation will be enabled after the local engine is connected.")
+            self.generate_status.setText("ComfyUI is not running. Connect the local engine to enable generation.")
             return
         self.generate_status.setText(f"{mode} request accepted. Workflow integration is next.")
 
