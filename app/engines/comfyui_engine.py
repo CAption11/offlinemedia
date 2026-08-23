@@ -30,14 +30,14 @@ class ComfyUIEngine:
         if not path.exists():
             raise WorkflowError(
                 f"No workflow installed for {request.generation_type.value}. "
-                f"Export an API-format ComfyUI workflow to {path}."
+                f"Copy an API or visual ComfyUI workflow to {path}."
             )
         return path
 
     def generate(self, request: GenerationRequest) -> GenerationResult:
         try:
             workflow_path = self.workflow_for(request)
-            workflow = Workflow.load(workflow_path)
+            workflow = Workflow.load(workflow_path, self.client.object_info())
             bindings = request.extra.get("bindings", {})
             if not isinstance(bindings, dict):
                 bindings = {}
@@ -51,10 +51,10 @@ class ComfyUIEngine:
                 "fps": request.fps,
                 "seed": request.seed,
             }
-
             if request.input_images and request.generation_type.value == "image_to_video":
                 values["image"] = self.client.upload_image(request.input_images[0])
 
+            workflow.auto_bind(values)
             workflow.apply_bindings(values, bindings)
             job_id = self.client.queue_prompt(workflow.to_dict())
             history = self.client.wait_for_completion(job_id)
