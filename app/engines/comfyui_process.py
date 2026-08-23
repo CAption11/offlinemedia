@@ -19,7 +19,6 @@ class ComfyUIProcessManager:
             return None
         candidates = (
             "run_cpu.bat",
-            "run_cpu.bat",
             "run_nvidia_gpu.bat",
             "run_amdgpu.bat",
             "run_amd_gpu.bat",
@@ -38,15 +37,8 @@ class ComfyUIProcessManager:
         if self.is_running():
             return
 
-        if launcher.suffix.lower() == ".bat":
-            command = ["cmd.exe", "/c", str(launcher)]
-        else:
-            command = ["python", str(launcher)]
-
-        creationflags = 0
-        if os.name == "nt":
-            creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
-
+        command = ["cmd.exe", "/c", str(launcher)] if launcher.suffix.lower() == ".bat" else ["python", str(launcher)]
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0
         self.process = subprocess.Popen(
             command,
             cwd=str(self.install_dir),
