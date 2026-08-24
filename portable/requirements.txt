@@ -1,0 +1,3 @@
+# Portable / Google Colab runtime dependencies.
+# Shared core dependencies remain in requirements-colab.txt.
+-r ../requirements-colab.txt
