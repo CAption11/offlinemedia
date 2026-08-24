@@ -44,7 +44,10 @@ SESSION 1: Repository Audit & Documentation (2026-08-24)
    - Fixed headless CI environment issue with PySide6
    - Removed PySide6 from CI workflow (not needed for tests)
    - Updated tests.yml to only install pytest
-   - All 18 tests passing locally and in CI
+   - Diagnosed missing 'app' module import in CI environment
+   - Created tests/conftest.py to handle path discovery
+   - Updated pyproject.toml to specify 'app' package
+   - All 18 tests passing locally and in CI ✅
 
 ================================================================================
 PENDING WORK
