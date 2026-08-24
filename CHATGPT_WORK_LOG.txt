@@ -25,129 +25,119 @@ They share the generation core. Portable proves the real AI pipeline before
 Mainload exposes it as an end-user feature.
 
 ================================================================================
-CHECK + WORK CYCLE - 2026-08-24
+LIVE COLAB GENERATION TEST - 2026-08-24
 ================================================================================
 
-User requested: "check and start working".
+The user ran videoAI.ipynb on a live Colab GPU runtime using the queued sample
+request:
 
-Checked active branch and handoff state. AI_HANDOFF_STATUS reported:
-CURRENT_AGENT=CHATGPT
-STATUS=READY
-TASK=Complete Colab notebook integration with trigger listener
-LAST_COMMIT=60271c9
+mode: text_to_video
+prompt: A cat waving its tail, sitting on a wooden floor, natural lighting
+320x240, 17 frames, 8 fps
 
-Verified that the user's notebook now exists in the repository at the ROOT:
-videoAI.ipynb
+Colab successfully completed the runtime/bootstrap stages and reached the real
+ComfyUI generation API. The generation failed with HTTP 400 validation:
 
-The notebook was initially a bare Colab notebook containing only the Colab
-badge and one empty code cell. It was therefore NOT safe to claim that the
-user's video-generation code had already been integrated.
+prompt_outputs_failed_validation
+node 3 (KSampler)
+input "steps"
+received "randomize"
+
+ComfyUI reported that "randomize" could not be converted to INT.
+
+ROOT CAUSE
+================================================================================
+
+The failure is in the repository's UI-workflow-to-API conversion, not GPU
+availability or the trigger queue.
+
+The official Wan 2.1 workflow stores KSampler widgets as:
+[seed, "randomize", steps, cfg, sampler_name, scheduler, denoise]
+
+Some current ComfyUI /object_info input_order responses omit the UI-only
+control_after_generate widget. The previous converter therefore mapped:
+seed -> seed
+"randomize" -> steps   <-- WRONG
+30 -> cfg               <-- shifted
+6 -> sampler_name       <-- shifted
+...
+
+The current official workflow itself confirms the KSampler widget sequence,
+including "randomize" immediately after seed.
 
 ================================================================================
-CHATGPT IMPLEMENTATION
+CHATGPT FIX
 ================================================================================
 
 Updated:
-videoAI.ipynb
+app/engines/workflow.py
 
 Commit:
-f8119c0b0b35493558578ad4976754c6452ec1bf
+57d9805774853964b7271e870403afa2aad3c77e
 
-The notebook now contains a real Portable worker skeleton that:
+Fix:
+- Detect ComfyUI seed inputs whose object_info metadata declares
+  control_after_generate.
+- Insert the synthetic control_after_generate widget immediately after seed
+  when the frontend omitted it from input_order.
+- Prefer widgets_values_named when a current ComfyUI frontend provides it.
+- Preserve linked inputs and existing generic workflow handling.
 
-1. Clones/updates the exact active branch.
-2. Detects an NVIDIA GPU with nvidia-smi.
-3. Installs requirements-colab.txt.
-4. Reads an optional GITHUB_TOKEN from Colab environment/Colab Secrets.
-5. Imports portable.trigger_listener.
-6. Reads portable/trigger.json from the active GitHub branch.
-7. Waits for status=queued requests.
-8. Extracts mode, prompt, width, height, frames and fps.
-9. Calls the existing shared scripts/test_generation.py entry point rather
-   than creating a second generation engine.
-10. Explicitly states that real generation requires a running ComfyUI server
-    and verified model/workflow installation.
+Added regression test:
+tests/test_workflow_binding.py
 
-This is intentionally generic. No MES assumptions were added.
+Commit:
+b98f3d3241bafb3ab64f8fa793160c95693c96f8
 
-================================================================================
-IMPORTANT TECHNICAL FINDING
-================================================================================
+The regression test reproduces the exact official KSampler widget sequence and
+asserts that:
+seed=123
+control_after_generate="randomize"
+steps=30
+cfg=6
+sampler_name="uni_pc"
+scheduler="simple"
+denoise=1
 
-The user's videoAI.ipynb was a blank notebook. Therefore this integration is
-currently the trigger/worker wiring, not a finished video-generation notebook.
-The actual generation still depends on:
-- ComfyUI running in the Colab runtime
-- verified Wan workflow/model assets
-- successful execution of scripts/test_generation.py
-- actual MP4/WEBM output validation
-
-No claim is being made that a real video has been generated yet.
+This prevents the exact HTTP 400 failure from returning unnoticed.
 
 ================================================================================
-TRIGGER ARCHITECTURE
+CURRENT TEST STATE
 ================================================================================
 
-GitHub Actions
-      |
-      v
-portable/trigger.json
-      |
-      v
-videoAI.ipynb polls GitHub
-      |
-      v
-existing OfflineMedia generation engine
-      |
-      v
-ComfyUI + NVIDIA GPU
-      |
-      v
-real video output
+The fix has been committed to GitHub, but it has NOT yet been executed in the
+user's live Colab runtime. Therefore the real generation milestone remains
+UNPROVEN.
 
-The listener itself only reads queued requests. It does not wake a sleeping
-Colab runtime.
+The Colab runtime currently contains the previous version of workflow.py until
+the repository changes are pulled/reloaded.
+
+NEXT LIVE TEST
+================================================================================
+
+1. Pull the latest active branch into the existing Colab runtime.
+2. Re-run the same generation command.
+3. Confirm the KSampler validation error is gone.
+4. Continue debugging only if ComfyUI returns a new concrete error.
+5. Do not claim video generation success until an actual output video is
+   produced and validated.
 
 ================================================================================
 HANDOVER TO CLAUDE
 ================================================================================
 
-Claude should now:
-
-1. Read this updated log.
-2. Read CLAUDE_WORK.txt.
-3. Read AI_HANDOFF_STATUS.txt.
-4. Inspect the new videoAI.ipynb content.
-5. Verify the trigger parameters are compatible with the existing generation
-   request and workflow binding logic.
-6. Add focused tests for the trigger-to-generation translation if appropriate.
-7. Check whether status acknowledgement/claiming is needed to prevent the same
-   queued request from being processed repeatedly.
-8. Preserve the generic design.
-9. Do not introduce MES assumptions.
-10. Update CLAUDE_WORK.txt and AI_HANDOFF_STATUS.txt when the review is done.
+Claude should review the workflow conversion fix and regression test, then
+continue with any additional compatibility issue found by the next live Colab
+run. Claude should update CLAUDE_WORK.txt and AI_HANDOFF_STATUS.txt when its
+review is complete.
 
 ================================================================================
 COMMUNICATION PROTOCOL
 ================================================================================
 
-ChatGPT -> Claude:
-- Update CHATGPT_WORK_LOG.txt.
-- Set AI_HANDOFF_STATUS.txt to CURRENT_AGENT=CLAUDE and NEXT_AGENT=CLAUDE.
-- Set STATUS=READY or REVIEW.
-- Record the final ChatGPT commit SHA.
-- Commit the changes.
-
-Claude -> ChatGPT:
-- Update CLAUDE_WORK.txt.
-- Set AI_HANDOFF_STATUS.txt to CURRENT_AGENT=CHATGPT and NEXT_AGENT=CHATGPT.
-- Set STATUS=READY or REVIEW.
-- Record the final Claude commit SHA.
-- Commit the changes.
-
-When the user says "check", ChatGPT inspects the status file, both work logs,
-recent commits and relevant code, then continues the next assigned task without
-requiring the user to explain the handoff.
+When the user says "check", ChatGPT inspects AI_HANDOFF_STATUS.txt,
+CLAUDE_WORK.txt, CHATGPT_WORK_LOG.txt, recent commits and relevant source/test
+changes, then continues the next assigned task automatically.
 
 ================================================================================
 END OF CHATGPT WORK LOG
