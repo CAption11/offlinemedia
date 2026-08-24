@@ -5,71 +5,37 @@
 Repository: CAption11/offlinemedia
 Branch: claude/scan-repo-chatgpt-review-6nljgh
 
-CURRENT_AGENT=CHATGPT
+CURRENT_AGENT=CLAUDE
 STATUS=READY
-TASK=Colab notebook + real generation testing
-NEXT_AGENT=CHATGPT
-LAST_COMMIT=3417a0f
+TASK=Review Portable Colab notebook and verify/continue real generation path
+NEXT_AGENT=CLAUDE
+LAST_COMMIT=e19a4d5
 
 ================================================================================
-HOW THIS FILE IS USED
+HANDOFF SUMMARY
 ================================================================================
 
-This is the quick coordination state between ChatGPT and Claude Code.
+ChatGPT reviewed Claude commit 3417a0f and found that the hand-written Wan
+workflows are templates and should not be treated as proven current ComfyUI
+workflows.
 
-Detailed work belongs in:
-- CHATGPT_WORK_LOG.txt  -> ChatGPT's work and handovers
-- CLAUDE_WORK.txt       -> Claude's work and handovers
+ChatGPT then:
+- Verified the current official ComfyUI Wan 2.1 example workflow structure.
+- Added portable/sync_official_workflows.py.
+- Added portable/OfflineMedia_Portable_Colab.ipynb.
+- Added a real Colab path using the shared OfflineMedia ComfyUI client/engine.
+- Added official Wan 2.1 T2V asset download steps.
+- Added ComfyUI startup, workflow conversion, queueing, output retrieval,
+  ffmpeg MP4 conversion and ffprobe validation steps.
+- Updated CHATGPT_WORK_LOG.txt.
 
-GitHub commit history is the source of truth for actual repository changes.
+REAL GPU GENERATION HAS NOT YET BEEN EXECUTED IN THIS SESSION.
 
-STATUS VALUES
--------------
-WORKING  = current agent is actively working
-READY    = current task is ready for the next agent to inspect/continue
-REVIEW   = implementation finished and needs review/testing
-BLOCKED  = cannot continue without a dependency or user decision
-FAILED   = attempted work failed and needs intervention
-IDLE     = no active task
+Claude should inspect the notebook and continue with tests, compatibility
+fixes, and real Colab execution if the environment is available.
 
-HANDOFF RULE
-------------
-When Claude completes work:
-1. Update CLAUDE_WORK.txt.
-2. Set this file to CURRENT_AGENT=CHATGPT and NEXT_AGENT=CHATGPT.
-3. Set STATUS=READY or REVIEW as appropriate.
-4. Record the final commit SHA.
-5. Commit all changes.
-
-When ChatGPT completes work:
-1. Update CHATGPT_WORK_LOG.txt.
-2. Set this file to CURRENT_AGENT=CLAUDE and NEXT_AGENT=CLAUDE.
-3. Set STATUS=READY or REVIEW as appropriate.
-4. Record the final commit SHA.
-5. Commit all changes.
-
-IMPORTANT
----------
-This file does not wake an AI or run an AI session. When the user says
-"check", ChatGPT should inspect this file, the two work logs, and recent Git
-commits before continuing. Claude's existing GitHub trigger handles Claude's
-side of the handoff.
-
-The user does NOT need to manually describe what the other AI did. The logs
-and commit history carry that context.
-
-================================================================================
-INITIAL HANDOFF
-================================================================================
-
-ChatGPT has started the Portable section and handed it to Claude for review
-and continuation. Portable currently contains Colab setup, diagnostics,
-requirements, a smoke-test entry point, and a Colab runbook. Real ComfyUI/model
-execution is not yet proven.
-
-Claude should read CHATGPT_WORK_LOG.txt and CLAUDE_WORK.txt, inspect the
-portable/ files, continue the Portable implementation, and update this file
-and CLAUDE_WORK.txt when finished.
+When Claude finishes, update CLAUDE_WORK.txt and this file with the actual
+result and set CURRENT_AGENT=CHATGPT.
 
 ================================================================================
 Last Updated: 2026-08-24
