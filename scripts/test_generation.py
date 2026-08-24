@@ -1,7 +1,10 @@
-"""Run a real OfflineMedia generation smoke test against ComfyUI."""
+"""Run and validate a real OfflineMedia generation smoke test against ComfyUI."""
 from __future__ import annotations
 
 import argparse
+import json
+import shutil
+import subprocess
 import sys
 from pathlib import Path
 
@@ -12,6 +15,52 @@ if str(ROOT) not in sys.path:
 from app.core.generation import GenerationRequest, GenerationType
 from app.engines.comfyui_client import ComfyUIClient
 from app.engines.comfyui_engine import ComfyUIEngine
+
+
+def validate_output(path: Path) -> dict:
+    """Validate that a generated output exists and is a readable media file."""
+    if not path.is_file():
+        raise RuntimeError(f"Output file does not exist: {path}")
+    if path.stat().st_size == 0:
+        raise RuntimeError(f"Output file is empty: {path}")
+
+    info = {"path": str(path), "size_bytes": path.stat().st_size}
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        info["ffprobe"] = "not installed"
+        return info
+
+    command = [
+        ffprobe,
+        "-v", "error",
+        "-print_format", "json",
+        "-show_streams",
+        "-show_format",
+        str(path),
+    ]
+    completed = subprocess.run(command, text=True, capture_output=True)
+    if completed.returncode != 0:
+        raise RuntimeError(f"ffprobe failed for {path}: {completed.stderr.strip()}")
+
+    try:
+        probe = json.loads(completed.stdout)
+    except json.JSONDecodeError as exc:
+        raise RuntimeError(f"ffprobe returned invalid JSON for {path}") from exc
+
+    streams = probe.get("streams", [])
+    video = next((stream for stream in streams if stream.get("codec_type") == "video"), None)
+    if video is None:
+        raise RuntimeError(f"No video stream found in output: {path}")
+
+    info.update({
+        "codec": video.get("codec_name"),
+        "width": video.get("width"),
+        "height": video.get("height"),
+        "frames": video.get("nb_frames"),
+        "fps": video.get("r_frame_rate"),
+        "duration": (probe.get("format") or {}).get("duration"),
+    })
+    return info
 
 
 def main() -> int:
@@ -56,8 +105,19 @@ def main() -> int:
 
     print("GENERATION PASSED")
     print("Job:", result.job_id)
+    if not result.output_files:
+        print("GENERATION FAILED: ComfyUI returned no output files")
+        return 1
+
     for output in result.output_files:
+        try:
+            info = validate_output(output)
+        except Exception as exc:
+            print(f"OUTPUT VALIDATION FAILED: {exc}")
+            return 1
         print("Output:", output)
+        print("Output validation:", json.dumps(info, sort_keys=True))
+
     return 0
 
 
