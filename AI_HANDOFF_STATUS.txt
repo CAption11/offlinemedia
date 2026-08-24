@@ -5,38 +5,60 @@
 Repository: CAption11/offlinemedia
 Branch: claude/scan-repo-chatgpt-review-6nljgh
 
-CURRENT_AGENT=CHATGPT
+CURRENT_AGENT=CLAUDE
 STATUS=READY
-TASK=Execute Colab notebook in real GPU environment for validation
-NEXT_AGENT=CHATGPT
-LAST_COMMIT=301848e
+TASK=Review generic Colab + GitHub + Trigger layer and integrate with Portable
+NEXT_AGENT=CLAUDE
+LAST_COMMIT=01c6c129
 
 ================================================================================
 HANDOFF SUMMARY
 ================================================================================
 
-ChatGPT reviewed Claude commit 3417a0f and found that the hand-written Wan
-workflows are templates and should not be treated as proven current ComfyUI
-workflows.
+ChatGPT implemented the generic Colab + GitHub + Trigger layer in the EXISTING
+repository and EXISTING active branch. No new repository was created.
 
-ChatGPT then:
-- Verified the current official ComfyUI Wan 2.1 example workflow structure.
-- Added portable/sync_official_workflows.py.
-- Added portable/OfflineMedia_Portable_Colab.ipynb.
-- Added a real Colab path using the shared OfflineMedia ComfyUI client/engine.
-- Added official Wan 2.1 T2V asset download steps.
-- Added ComfyUI startup, workflow conversion, queueing, output retrieval,
-  ffmpeg MP4 conversion and ffprobe validation steps.
-- Updated CHATGPT_WORK_LOG.txt.
+Added:
+- .github/workflows/portable-trigger.yml
+- portable/trigger_listener.py
+- portable/trigger_protocol.md
 
-REAL GPU GENERATION HAS NOT YET BEEN EXECUTED IN THIS SESSION.
+The GitHub Actions workflow accepts:
+- mode
+- prompt
+- width
+- height
+- frames
+- fps
 
-Claude should inspect the notebook and continue with tests, compatibility
-fixes, and real Colab execution if the environment is available.
+It writes a durable queued request to portable/trigger.json.
 
-When Claude finishes, update CLAUDE_WORK.txt and this file with the actual
-result and set CURRENT_AGENT=CHATGPT.
+The Colab listener polls the GitHub Contents API and returns queued requests to
+a running notebook. Private repositories use a GitHub token supplied through
+GITHUB_TOKEN or GH_TOKEN.
+
+IMPORTANT:
+This is a durable trigger/queue, not a claim that GitHub can wake a terminated
+Colab runtime. The Colab notebook must be running and polling. If Colab ends,
+the request remains queued in GitHub until a new runtime reads it.
+
+The user has a separate Drive-hosted notebook named videoAI.ipynb. The exact
+Drive notebook cannot be edited through the GitHub connector. It should be
+saved into this active branch through Colab's Save a copy in GitHub if the user
+wants it version-controlled, preferably at portable/videoAI.ipynb.
 
 ================================================================================
-Last Updated: 2026-08-24
+CLAUDE NEXT TASK
+================================================================================
+
+1. Review the three new trigger files.
+2. Check their compatibility with the existing Portable notebook and shared
+   generation engine.
+3. Add focused tests for trigger request/listener behavior where appropriate.
+4. Preserve the generic design. Do not introduce MES assumptions.
+5. Update CLAUDE_WORK.txt with findings and test results.
+6. Update this file when the Claude review is complete.
+
+================================================================================
+Last Updated: 2026-08-24 by ChatGPT
 ================================================================================
