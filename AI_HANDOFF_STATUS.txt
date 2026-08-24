@@ -56,17 +56,65 @@ break the user's save path.
 Tests: tests/test_trigger_listener.py extended 9 -> 19. Full suite 37 passed.
 
 ================================================================================
-OPEN ITEM FOR CHATGPT - NEEDS A DECISION, NOT A PATCH
+FOR CHATGPT - THE image_to_video DECISION (USER ASKED FOR THIS TO BE RELAYED)
 ================================================================================
 
-The trigger workflow offers mode=image_to_video but has no parameter for an
-input image, and validate_generation does not reject an empty input_images
-list, so such a job fails deep inside the workflow instead of up front.
+The problem: portable-trigger.yml offers mode=image_to_video but has no
+parameter for an input image, and validate_generation does not reject an empty
+input_images list. Such a job therefore fails deep inside the workflow instead
+of being rejected up front. On top of that, the official ComfyUI Wan 2.1
+image-to-video example needs the 14B 480p model plus clip_vision_h.safetensors,
+and comfyui_bootstrap.py downloads only the 1.3B text-to-video assets. So the
+mode is offered but cannot succeed today by two independent routes.
 
-Either add an image input to portable-trigger.yml (and a way to get the file
-into the Colab runtime), or restrict the workflow's mode choice to
-text_to_video until image-to-video assets are in place. Claude did not pick one
-because it changes the product surface.
+CLAUDE'S RECOMMENDATION: restrict the workflow's mode choice to text_to_video
+until the I2V assets and an image-input path both exist. Offering a mode that
+cannot work is worse than not offering it. The alternative - adding an image
+parameter - also needs a way to get the actual image file into the Colab
+runtime, which is a bigger design question (upload to the repo? a URL? Drive?).
+
+This stays ChatGPT's call because it changes the product surface. The user has
+been told the recommendation; they have not overridden it either way.
+
+================================================================================
+NEW FINDING - THE TRIGGER WORKFLOW CANNOT BE DISPATCHED YET
+================================================================================
+
+Verified, not assumed: POST to
+/actions/workflows/portable-trigger.yml/dispatches returns 404, and
+list_workflows shows only ai-orchestration.yml and tests.yml.
+
+Cause: GitHub only registers a workflow_dispatch workflow once the file exists
+on the repository's DEFAULT branch. portable-trigger.yml lives only on
+claude/scan-repo-chatgpt-review-6nljgh, so "GitHub > Actions > Portable Colab
+Trigger > Run workflow" - the flow trigger_protocol.md instructs the user to
+use - does not exist in the UI yet. It starts working when this PR merges.
+
+Workaround, already documented in trigger_protocol.md: commit
+portable/trigger.json to the branch directly. The listener reads that file over
+the contents API and does not care what wrote it.
+
+================================================================================
+USER-REQUESTED SAMPLE RUN - QUEUED AND WAITING
+================================================================================
+
+The user asked for a sample run of a cat waving its tail. Because the workflow
+cannot be dispatched (above), Claude seeded the request directly:
+
+  portable/trigger.json
+  mode:   text_to_video
+  prompt: A cat waving its tail, sitting on a wooden floor, natural lighting
+  320x240, 17 frames, 8 fps
+  source: manual_seed   (honest origin - Actions did not write this)
+
+text_to_video was chosen because no input image exists and image_to_video
+cannot run at all right now, per the decision section above.
+
+The job is queued and waiting. To run it: open videoAI.ipynb in Colab on a GPU
+runtime and execute the cells. Cell 5 will show this request, cell 7 picks it
+up, cell 9 installs and starts ComfyUI, cell 10 generates.
+
+THIS IS A QUEUED REQUEST, NOT A GENERATED VIDEO. Nobody has run it yet.
 
 Also note: the Session 3 hand-written Wan templates
 (workflows/text_to_video_wan_2_1.json, image_to_video_wan_2_1.json) are never

@@ -39,6 +39,17 @@ GitHub Actions workflow:
 
 Open **GitHub → Actions → Portable Colab Trigger → Run workflow**.
 
+> **Not available until this branch reaches `main`.** GitHub only registers a
+> `workflow_dispatch` workflow once the file exists on the repository's default
+> branch. `portable-trigger.yml` currently lives only on
+> `claude/scan-repo-chatgpt-review-6nljgh`, so the workflow does not appear in
+> the Actions list and dispatching it returns 404 (verified, not assumed).
+>
+> Until the PR merges, queue a job by committing `portable/trigger.json`
+> directly to the branch. The Colab listener reads that file through the
+> contents API, so it does not care whether Actions or a human wrote it. Use
+> `"source": "manual_seed"` so the origin stays honest.
+
 The workflow accepts:
 
 - `mode`: `text_to_video` or `image_to_video`
