@@ -5,175 +5,99 @@
 Repository: CAption11/offlinemedia
 Branch: claude/scan-repo-chatgpt-review-6nljgh
 
-CURRENT_AGENT=CHATGPT
-STATUS=REVIEW
-TASK=Re-run the live Colab test after pulling this branch
-NEXT_AGENT=CHATGPT
-LAST_COMMIT=fff3fcb
+CURRENT_AGENT=CLAUDE
+STATUS=READY
+TASK=Review output validation and Colab video display changes
+NEXT_AGENT=CLAUDE
+LAST_COMMIT=7a980ade824607fcb0e6aa1a1a423f8069c2d3a4
 
 ================================================================================
-CLAUDE REVIEW OF THE SEED-WIDGET FIX (57d9805 / b98f3d3) - TWO GAPS CLOSED
+CURRENT MILESTONE
 ================================================================================
 
-ChatGPT's diagnosis of the live HTTP 400 was correct: the UI-to-API converter
-shifted KSampler widget values because control_after_generate is a UI-only
-widget present in widgets_values but absent from input_order. The root cause
-and the approach (use node metadata, do not hard-code node IDs) are both right.
+A real text-to-video generation was successfully executed by the user in a
+live Colab GPU runtime. The earlier KSampler validation bug was fixed and the
+same queued cat request reached successful generation.
 
-The fix covered only one of the two code paths that consume widgets_values.
+The project has now proven the core path:
+GitHub trigger queue -> Colab GPU -> ComfyUI -> Wan 2.1 -> generated video.
 
-GAP 1 - the fix was bypassed entirely on a second export shape.
-  names = widget_names or [... expanded_names ...]
-  widget_names is built from node["inputs"] entries with link=None. Newer
-  ComfyUI frontends export widget inputs there, not just linked ones. When they
-  do, widget_names wins and the control_after_generate insertion is skipped.
-  Reproduced before fixing: steps='randomize', cfg=30 - the exact HTTP 400 the
-  user hit. It would have come straight back on that export shape.
-
-GAP 2 - only one seed control was inserted per node.
-  The "not in expanded_names" guard meant a node with two seed inputs got one
-  synthetic widget instead of two, shifting everything after the second seed.
-  Demonstrated with seed + noise_seed: steps received "fixed" instead of 40.
-
-FIX: extracted Workflow._with_seed_controls() and applied it to BOTH name
-lists, inserting one widget per qualifying input. Both export shapes now
-convert correctly.
-
-TESTS: two regression tests added. Both were verified to FAIL against the
-pre-fix workflow.py and pass after, so they guard something real. ChatGPT's own
-regression test is untouched and still passes. Full suite: 40 passed.
-
-NOT CHANGED ON PURPOSE: the converter emits control_after_generate into the API
-payload though it is UI-only. ComfyUI ignores unknown extra inputs, and
-ChatGPT's test asserts the current behaviour, so it was left alone rather than
-churning that test.
-
-NEXT LIVE RUN: the Colab runtime still holds the pre-fix workflow.py. Pull this
-branch in the runtime before re-running, or the same HTTP 400 will reappear and
-look like the fix failed.
+The remaining verification is output handling: the repository must validate
+the generated media file and the Colab notebook must display the generated
+video. Those changes are implemented but have not yet been live-tested after
+the latest commit.
 
 ================================================================================
-CLAUDE REVIEW OF f8119c0 - COMPLETE
+LATEST CHATGPT CHANGES
 ================================================================================
 
-Claude reviewed the videoAI.ipynb trigger integration against all six review
-questions. Two blocking defects were found by reproduction and fixed.
+1. scripts/test_generation.py
+Commit: bd2f5b6544ca051c4486bbd2bf6c2bb22fce3eaf
 
-DEFECT 1 (BLOCKING) - videoAI.ipynb could never generate a video.
-The notebook invoked scripts/test_generation.py, which needs ComfyUI on
-127.0.0.1:8188, but never installed ComfyUI, downloaded weights or started the
-server. Every run would have failed with exit code 2.
+Added output validation:
+- output file must exist
+- output file must be non-empty
+- ffprobe is used when available
+- a video stream is required
+- codec, resolution, frame count, FPS and duration are reported
+- validation failures return a non-zero exit code
 
-Fix: added portable/comfyui_bootstrap.py as SHARED code (install ComfyUI,
-download official Wan 2.1 T2V assets, sync official workflows, start server,
-wait for readiness, surface the server log on failure). videoAI.ipynb now calls
-bootstrap() before generating. The bootstrap was previously trapped as inline
-cells in OfflineMedia_Portable_Colab.ipynb; it is now reusable by both.
+2. videoAI.ipynb
+Commit: 7a980ade824607fcb0e6aa1a1a423f8069c2d3a4
 
-DEFECT 2 - Queue inspection crashed on an empty queue.
-portable/trigger.json does not exist yet, so the contents API returns 404 and
-cell 5 raised HTTPError. Reproduced against the live API.
+The notebook now:
+- pulls the active branch
+- consumes a queued trigger
+- starts ComfyUI
+- captures generation stdout/stderr
+- extracts output paths
+- validates output files
+- runs ffprobe validation
+- displays the video in Colab
+- prints an explicit final success message after validation
 
-Fix: get_trigger() raises TriggerNotFound for a missing queue file (real errors
-still propagate); added read_trigger_or_none() for inspection; wait_for_trigger
-treats an empty queue as "no job yet".
-
-DUPLICATE PROCESSING (review question 4) - CONFIRMED REAL, FIXED.
-Nothing ever moved a request off "queued", so two runtimes would both run the
-same job and a notebook re-run would repeat the last one. claim_trigger() now
-PUTs status=running conditional on the blob SHA that get_trigger already
-returned, so exactly one worker wins; the loser keeps polling. skip_job_ids
-guards re-runs. Claiming requires a token and fails fast without one.
-
-VERIFIED OK (review question 3): trigger mode values match GenerationType
-exactly; width/height/frames/fps map cleanly onto GenerationRequest and the
-defaults satisfy the divisible-by-8 rule.
-
-RECOMMENDATION (review question 6): keep videoAI.ipynb at the repository root.
-Colab's "Save a copy in GitHub" round-trips to the path it was opened from and
-the notebook's Colab badge points there. Moving it is cosmetic churn that would
-break the user's save path.
-
-Tests: tests/test_trigger_listener.py extended 9 -> 19. Full suite 37 passed.
+IMPORTANT: these newest validation/display changes still require one live
+Colab run. Do not claim they are live-verified until the user runs them.
 
 ================================================================================
-FOR CHATGPT - THE image_to_video DECISION (USER ASKED FOR THIS TO BE RELAYED)
+CLAUDE REVIEW TASK
 ================================================================================
 
-The problem: portable-trigger.yml offers mode=image_to_video but has no
-parameter for an input image, and validate_generation does not reject an empty
-input_images list. Such a job therefore fails deep inside the workflow instead
-of being rejected up front. On top of that, the official ComfyUI Wan 2.1
-image-to-video example needs the 14B 480p model plus clip_vision_h.safetensors,
-and comfyui_bootstrap.py downloads only the 1.3B text-to-video assets. So the
-mode is offered but cannot succeed today by two independent routes.
-
-CLAUDE'S RECOMMENDATION: restrict the workflow's mode choice to text_to_video
-until the I2V assets and an image-input path both exist. Offering a mode that
-cannot work is worse than not offering it. The alternative - adding an image
-parameter - also needs a way to get the actual image file into the Colab
-runtime, which is a bigger design question (upload to the repo? a URL? Drive?).
-
-This stays ChatGPT's call because it changes the product surface. The user has
-been told the recommendation; they have not overridden it either way.
+Claude should:
+1. Review the two latest commits above.
+2. Run/review relevant tests for regression risk.
+3. Inspect the output handling against the existing ComfyUI client/engine.
+4. Review trigger lifecycle handling and identify whether queued/running jobs
+   are explicitly marked completed or failed after generation.
+5. Update CLAUDE_WORK.txt with findings.
+6. Update this status file when the review is complete.
 
 ================================================================================
-NEW FINDING - THE TRIGGER WORKFLOW CANNOT BE DISPATCHED YET
+PROJECT STATUS
 ================================================================================
 
-Verified, not assumed: POST to
-/actions/workflows/portable-trigger.yml/dispatches returns 404, and
-list_workflows shows only ai-orchestration.yml and tests.yml.
+MAINLOAD
+- Architecture planned.
+- Not the current active milestone.
 
-Cause: GitHub only registers a workflow_dispatch workflow once the file exists
-on the repository's DEFAULT branch. portable-trigger.yml lives only on
-claude/scan-repo-chatgpt-review-6nljgh, so "GitHub > Actions > Portable Colab
-Trigger > Run workflow" - the flow trigger_protocol.md instructs the user to
-use - does not exist in the UI yet. It starts working when this PR merges.
-
-Workaround, already documented in trigger_protocol.md: commit
-portable/trigger.json to the branch directly. The listener reads that file over
-the contents API and does not care what wrote it.
-
-================================================================================
-USER-REQUESTED SAMPLE RUN - QUEUED AND WAITING
-================================================================================
-
-The user asked for a sample run of a cat waving its tail. Because the workflow
-cannot be dispatched (above), Claude seeded the request directly:
-
-  portable/trigger.json
-  mode:   text_to_video
-  prompt: A cat waving its tail, sitting on a wooden floor, natural lighting
-  320x240, 17 frames, 8 fps
-  source: manual_seed   (honest origin - Actions did not write this)
-
-text_to_video was chosen because no input image exists and image_to_video
-cannot run at all right now, per the decision section above.
-
-The job is queued and waiting. To run it: open videoAI.ipynb in Colab on a GPU
-runtime and execute the cells. Cell 5 will show this request, cell 7 picks it
-up, cell 9 installs and starts ComfyUI, cell 10 generates.
-
-THIS IS A QUEUED REQUEST, NOT A GENERATED VIDEO. Nobody has run it yet.
-
-Also note: the Session 3 hand-written Wan templates
-(workflows/text_to_video_wan_2_1.json, image_to_video_wan_2_1.json) are never
-loaded by ComfyUIEngine, which resolves text_to_video.json / image_to_video.json.
-They are reference-only and superseded by workflows/official/.
+PORTABLE
+- GitHub trigger queue: PASS
+- Colab worker: PASS
+- NVIDIA/ComfyUI bootstrap: PASS
+- Wan 2.1 T2V generation: PASS in live run
+- Workflow conversion: PASS in live run
+- Output validation: implemented, live verification pending
+- Colab video display: implemented, live verification pending
+- Explicit trigger completion state: review pending
 
 ================================================================================
-NEXT EVIDENCE MILESTONE
+COMMUNICATION PROTOCOL
 ================================================================================
 
-A real video has still NOT been generated. videoAI.ipynb can now reach a
-running ComfyUI, which it could not before, but the outstanding milestone is an
-actual GPU run in Colab that produces and validates a video file.
-
-Configuration is not generation. Do not record success without a real output.
+When the user says "check", ChatGPT inspects this file, CLAUDE_WORK.txt,
+CHATGPT_WORK_LOG.txt, recent commits and relevant source/test changes, then
+continues the next assigned task automatically.
 
 ================================================================================
-END STATUS
-================================================================================
-Last Updated: 2026-08-24 by Claude
+Last Updated: 2026-08-25 by ChatGPT
 ================================================================================
