@@ -1,0 +1,131 @@
+{
+  "workflow_name": "Text-to-Video (Wan 2.1 1.3B)",
+  "version": "1.0",
+  "description": "Lightweight text-to-video generation using Wan 2.1 1.3B model for Colab environments",
+  "model_name": "wan_2_1_1_3b",
+  "nodes": {
+    "1": {
+      "class_type": "CheckpointLoaderSimple",
+      "inputs": {
+        "ckpt_name": "wan_2_1_1_3b.safetensors"
+      }
+    },
+    "2": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "placeholder_positive_prompt",
+        "clip": ["1", 1]
+      }
+    },
+    "3": {
+      "class_type": "CLIPTextEncode",
+      "inputs": {
+        "text": "placeholder_negative_prompt",
+        "clip": ["1", 1]
+      }
+    },
+    "4": {
+      "class_type": "VAELoader",
+      "inputs": {
+        "vae_name": "default.vae.safetensors"
+      }
+    },
+    "5": {
+      "class_type": "KSamplerSimple",
+      "inputs": {
+        "seed": 0,
+        "steps": 20,
+        "cfg": 7.5,
+        "sampler_name": "euler",
+        "scheduler": "normal",
+        "denoise": 1.0,
+        "model": ["1", 0],
+        "positive": ["2", 0],
+        "negative": ["3", 0],
+        "latent_image": ["7", 0]
+      }
+    },
+    "6": {
+      "class_type": "VAEDecode",
+      "inputs": {
+        "samples": ["5", 0],
+        "vae": ["4", 0]
+      }
+    },
+    "7": {
+      "class_type": "EmptyLatentVideo",
+      "inputs": {
+        "width": 320,
+        "height": 240,
+        "length": 17,
+        "batch_size": 1
+      }
+    },
+    "8": {
+      "class_type": "VideoConcat",
+      "inputs": {
+        "videos": [["6", 0]]
+      }
+    },
+    "9": {
+      "class_type": "VHS_VideoCombine",
+      "inputs": {
+        "images": ["6", 0],
+        "frame_rate": 8,
+        "loop_count": 0,
+        "format": "video/mp4",
+        "pingpong": false,
+        "save_output": true
+      }
+    }
+  },
+  "links": [
+    [1, 1, 1, 2, 1, "CLIP"],
+    [2, 1, 1, 3, 1, "CLIP"],
+    [3, 1, 0, 5, 0, "MODEL"],
+    [4, 2, 0, 5, 1, "CONDITIONING"],
+    [5, 3, 0, 5, 2, "CONDITIONING"],
+    [6, 7, 0, 5, 3, "LATENT"],
+    [7, 5, 0, 6, 0, "SAMPLES"],
+    [8, 4, 0, 6, 1, "VAE"],
+    [9, 6, 0, 9, 0, "IMAGE"]
+  ],
+  "binding_hints": {
+    "prompt": {
+      "node": "2",
+      "input": "text",
+      "type": "text"
+    },
+    "negative_prompt": {
+      "node": "3",
+      "input": "text",
+      "type": "text"
+    },
+    "width": {
+      "node": "7",
+      "input": "width",
+      "type": "int"
+    },
+    "height": {
+      "node": "7",
+      "input": "height",
+      "type": "int"
+    },
+    "frames": {
+      "node": "7",
+      "input": "length",
+      "type": "int"
+    },
+    "fps": {
+      "node": "9",
+      "input": "frame_rate",
+      "type": "int"
+    },
+    "seed": {
+      "node": "5",
+      "input": "seed",
+      "type": "int"
+    }
+  },
+  "notes": "This is a template workflow. Exact node names and connections depend on the installed ComfyUI version and available custom nodes. Verify in live Colab environment."
+}
