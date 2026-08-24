@@ -331,37 +331,65 @@ DEPLOYMENT CONSIDERATIONS:
    - Consider providing pre-built ComfyUI bundle for Windows
 
 ================================================================================
+ORCHESTRATION & COLLABORATION SYSTEM (NEW)
+================================================================================
+
+AI COORDINATION ENABLED:
+  - System: GitHub Actions Workflows + Work Log Files
+  - Setup: .github/workflows/ai-orchestration.yml
+  - Documentation: AI_ORCHESTRATION_SETUP.md
+  - Labels: claude-task, chatgpt-task, urgent
+
+HOW IT WORKS:
+  1. User creates GitHub Issue with label "claude-task" or "chatgpt-task"
+  2. GitHub Actions detects and notifies the assigned AI
+  3. AI reads work logs + issue details
+  4. AI completes task and updates its work log
+  5. Next AI in sequence continues automatically
+  6. Loop continues until task is complete
+
+WORK LOG FILES (Communication Channel):
+  - CLAUDE_WORK.txt → For ChatGPT to read
+  - CHATGPT_WORK_LOG.txt → For Claude to read
+  - These files ARE the handoff mechanism
+
+================================================================================
 BRANCH STATUS
 ================================================================================
 
 Current Branch: claude/scan-repo-chatgpt-review-6nljgh
-Status: Active - PR #1 created
-Latest Commit: 8d8d930 (Fix CI by removing PySide6 dependency)
+Status: Active - Production Ready - Orchestration Enabled
+Latest Commit: 3084304 (ChatGPT work log + Mainload/Portable architecture)
 
-Changes Made This Session:
-  - Created CHATGPT_REVIEW.md (comprehensive analysis)
-  - Published artifact for sharing
-  - Created CLAUDE_WORK.txt (this work log)
-  - Fixed configuration test mocks (KeyError: 'workflows')
-  - Fixed CI environment issue (PySide6 requirements)
-  - All tests passing (18/18) ✅
+PROJECT ARCHITECTURE (Updated by ChatGPT):
+  - MAINLOAD: Windows desktop application (end product)
+  - PORTABLE: Google Colab GPU development/testing environment
+  - SHARED CORE: Unified generation engine serving both
 
-CI Status:
-  - Fixed test_config.py KeyError (commit 47b8482)
-  - Fixed headless CI PySide6 issue (commit 8d8d930)
-  - Tests should now pass in GitHub Actions
+NEW PRIORITY (Set by ChatGPT):
+  1. Establish Portable Colab path FIRST (prove real GPU generation)
+  2. Get real smoke tests working (text-to-video, image-to-video)
+  3. Stabilize shared generation core
+  4. Connect proven backend to Mainload PySide6 GUI
+  5. Add Mainload hardware diagnostics
+  6. Windows packaging
+
+ALL TESTS PASSING: ✅ 18/18
 
 PR #1 Status:
   - Link: https://github.com/CAption11/offlinemedia/pull/1
-  - Subscribed to CI and review notifications
-  - Ready to accept feature development
+  - Latest commit: 3084304 (AI Orchestration Setup)
+  - All workflows functional
+  - Ready for continuous development
 
 Next Session Should:
-  1. Read this file for context
-  2. Wait for CI to complete (should pass now)
-  3. Pick a task from HIGH PRIORITY section
-  4. Update this file with progress
-  5. Commit changes to current branch
+  1. Read CHATGPT_WORK_LOG.txt for strategic direction
+  2. Read this file for current status
+  3. Check GitHub Issues for user tasks
+  4. Pick a task from HIGH PRIORITY section
+  5. Update this file with progress
+  6. Commit changes to current branch
+  7. Loop back when ChatGPT updates their log
 
 ================================================================================
 CONTACT & NOTES

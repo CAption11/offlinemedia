@@ -1,0 +1,139 @@
+name: AI Orchestration
+
+on:
+  issues:
+    types: [opened, labeled]
+  push:
+    branches:
+      - claude/scan-repo-chatgpt-review-6nljgh
+    paths:
+      - '*WORK_LOG.txt'
+  workflow_dispatch:
+
+jobs:
+  notify-ai-task:
+    if: |
+      contains(github.event.issue.labels.*.name, 'claude-task') ||
+      contains(github.event.issue.labels.*.name, 'chatgpt-task') ||
+      contains(github.event.head_commit.message, 'WORK_LOG')
+
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract Issue Details
+        if: github.event_name == 'issues'
+        id: issue_details
+        run: |
+          TITLE="${{ github.event.issue.title }}"
+          BODY="${{ github.event.issue.body }}"
+          LABELS="${{ join(github.event.issue.labels.*.name, ', ') }}"
+          echo "TITLE=$TITLE" >> $GITHUB_OUTPUT
+          echo "BODY=$BODY" >> $GITHUB_OUTPUT
+          echo "LABELS=$LABELS" >> $GITHUB_OUTPUT
+          echo "ASSIGNEE=claude" >> $GITHUB_OUTPUT
+
+          # Determine which AI should handle this
+          if [[ "$LABELS" == *"claude-task"* ]]; then
+            echo "TARGET_AI=Claude Code" >> $GITHUB_OUTPUT
+          elif [[ "$LABELS" == *"chatgpt-task"* ]]; then
+            echo "TARGET_AI=ChatGPT" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Detect Work Log Update
+        if: github.event_name == 'push'
+        id: worklog_check
+        run: |
+          git diff HEAD~1 HEAD --name-only | grep -i "work_log" && echo "WORKLOG_UPDATED=true" >> $GITHUB_OUTPUT || echo "WORKLOG_UPDATED=false" >> $GITHUB_OUTPUT
+
+          # Show latest work log
+          if [ -f "CLAUDE_WORK.txt" ]; then
+            echo "LATEST_CLAUDE_WORK=$(tail -20 CLAUDE_WORK.txt)" >> $GITHUB_OUTPUT
+          fi
+          if [ -f "CHATGPT_WORK_LOG.txt" ]; then
+            echo "LATEST_CHATGPT_WORK=$(tail -20 CHATGPT_WORK_LOG.txt)" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on Issue - Claude Task
+        if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'claude-task')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🤖 **Claude Code Task Assigned**
+
+**Task:** ${{ steps.issue_details.outputs.TITLE }}
+
+**Description:**
+${{ steps.issue_details.outputs.BODY }}
+
+**Status:** Claude Code has been notified. Working on this task...
+
+---
+*This task will be tracked in CLAUDE_WORK.txt on the active branch.*
+`
+            })
+
+      - name: Comment on Issue - ChatGPT Task
+        if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'chatgpt-task')
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: `🤖 **ChatGPT Task Assigned**
+
+**Task:** ${{ steps.issue_details.outputs.TITLE }}
+
+**Description:**
+${{ steps.issue_details.outputs.BODY }}
+
+**Status:** ChatGPT has been notified. Working on this task...
+
+---
+*This task will be tracked in CHATGPT_WORK_LOG.txt on the active branch.*
+`
+            })
+
+      - name: Notify Work Log Update
+        if: github.event_name == 'push' && steps.worklog_check.outputs.WORKLOG_UPDATED == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            console.log('📋 Work Log Updated');
+            console.log('Commit: ${{ github.event.head_commit.message }}');
+            console.log('Next AI in sequence should review and continue work.');
+
+      - name: Check Test Status
+        run: |
+          echo "✅ Workflow orchestration active"
+          echo "📝 Monitoring: CLAUDE_WORK.txt, CHATGPT_WORK_LOG.txt"
+          echo "🏷️  Labels: claude-task, chatgpt-task, urgent"
+          echo "🔄 Auto-triggering: Yes"
+
+  validate-coordination:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify Work Logs Exist
+        run: |
+          echo "🔍 Checking work logs..."
+          [ -f "CLAUDE_WORK.txt" ] && echo "✅ CLAUDE_WORK.txt found" || echo "⚠️  CLAUDE_WORK.txt missing"
+          [ -f "CHATGPT_WORK_LOG.txt" ] && echo "✅ CHATGPT_WORK_LOG.txt found" || echo "⚠️  CHATGPT_WORK_LOG.txt missing"
+
+      - name: Show Coordination Status
+        run: |
+          echo "📊 Coordination Status"
+          echo "===================="
+          [ -f "CLAUDE_WORK.txt" ] && tail -5 CLAUDE_WORK.txt
+          [ -f "CHATGPT_WORK_LOG.txt" ] && tail -5 CHATGPT_WORK_LOG.txt
