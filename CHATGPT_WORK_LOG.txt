@@ -10,11 +10,8 @@ WORKING BRANCH: claude/scan-repo-chatgpt-review-6nljgh
 PURPOSE
 ================================================================================
 Shared handover log between ChatGPT and Claude Code.
-
 Claude reads this file + CLAUDE_WORK.txt before major changes.
 ChatGPT reads both before making changes.
-Claude records its work in CLAUDE_WORK.txt.
-ChatGPT records its work here.
 GitHub commit history is the source of truth for actual repository changes.
 
 ================================================================================
@@ -28,111 +25,88 @@ They share the generation core. Portable proves the real AI pipeline before
 Mainload exposes it as an end-user feature.
 
 ================================================================================
-NEW GENERIC COLAB + GITHUB + TRIGGER LAYER - 2026-08-24
+CHECK + WORK CYCLE - 2026-08-24
 ================================================================================
 
-The user requested the generic Colab + GitHub + Trigger setup to be built in
-the EXISTING repository and EXISTING active branch. No new repository was
-created and no MES-specific assumptions were introduced.
+User requested: "check and start working".
 
-Active branch:
-claude/scan-repo-chatgpt-review-6nljgh
+Checked active branch and handoff state. AI_HANDOFF_STATUS reported:
+CURRENT_AGENT=CHATGPT
+STATUS=READY
+TASK=Complete Colab notebook integration with trigger listener
+LAST_COMMIT=60271c9
 
-Added:
-
-1. .github/workflows/portable-trigger.yml
-
-Purpose:
-- Manual GitHub Actions trigger for Portable.
-- Accepts mode, prompt, width, height, frames and fps.
-- Creates a durable JSON request at portable/trigger.json.
-- Pushes the request to the active branch.
-
-This is intentionally a trigger/queue, not a claim that GitHub Actions can
-magically execute a sleeping Google Colab session.
-
-2. portable/trigger_listener.py
-
-Purpose:
-- Poll the GitHub Contents API for portable/trigger.json.
-- Wait until a request has status=queued.
-- Return the generation request to the running Colab notebook.
-- Supports private repositories through a GitHub token supplied by environment
-  variable GITHUB_TOKEN or GH_TOKEN.
-
-3. portable/trigger_protocol.md
-
-Documents the generic architecture and the Colab listener cell.
-
-Architecture:
-
-GitHub Actions
-     |
-     v
-portable/trigger.json
-     |
-     v
-running Colab notebook polls GitHub
-     |
-     v
-OfflineMedia generation
-     |
-     v
-ComfyUI + NVIDIA GPU
-
-IMPORTANT LIMITATION:
-Colab is not a permanent server. The notebook must already be running and
-polling. If its session expires, the queued request remains in GitHub until a
-new Colab session starts and reads it.
-
-================================================================================
-USER COLAB NOTEBOOK
-================================================================================
-
-The user has a separate Colab notebook named:
+Verified that the user's notebook now exists in the repository at the ROOT:
 videoAI.ipynb
 
-Shared link supplied by the user:
-https://colab.research.google.com/drive/1nkkG0e6-QMzI9m6gA4vi_OIdBaATgtW0?usp=sharing
-
-The GitHub connector cannot directly edit the Drive-hosted notebook. The
-repository already contains OfflineMedia_Portable_Colab.ipynb, but the user's
-specific videoAI.ipynb should be saved into this active GitHub branch through
-Colab's File -> Save a copy in GitHub if they want that exact notebook
-version-controlled.
-
-Recommended repository path:
-portable/videoAI.ipynb
-
-The trigger listener cell is documented in portable/trigger_protocol.md.
+The notebook was initially a bare Colab notebook containing only the Colab
+badge and one empty code cell. It was therefore NOT safe to claim that the
+user's video-generation code had already been integrated.
 
 ================================================================================
-PREVIOUS PORTABLE WORK
+CHATGPT IMPLEMENTATION
 ================================================================================
 
-Claude previously added Wan workflow/model templates and reported 18 tests
-passing. ChatGPT reviewed those workflows and found they were not equivalent
-to the current official ComfyUI Wan workflow structure.
+Updated:
+videoAI.ipynb
 
-ChatGPT then added:
-- portable/sync_official_workflows.py
-- portable/OfflineMedia_Portable_Colab.ipynb
+Commit:
+f8119c0b0b35493558578ad4976754c6452ec1bf
 
-The notebook uses the shared ComfyUI client/engine and performs real output
-validation. Real GPU generation has NOT yet been executed in this session.
+The notebook now contains a real Portable worker skeleton that:
+
+1. Clones/updates the exact active branch.
+2. Detects an NVIDIA GPU with nvidia-smi.
+3. Installs requirements-colab.txt.
+4. Reads an optional GITHUB_TOKEN from Colab environment/Colab Secrets.
+5. Imports portable.trigger_listener.
+6. Reads portable/trigger.json from the active GitHub branch.
+7. Waits for status=queued requests.
+8. Extracts mode, prompt, width, height, frames and fps.
+9. Calls the existing shared scripts/test_generation.py entry point rather
+   than creating a second generation engine.
+10. Explicitly states that real generation requires a running ComfyUI server
+    and verified model/workflow installation.
+
+This is intentionally generic. No MES assumptions were added.
 
 ================================================================================
-CURRENT CHATGPT COMMITS FOR THIS HANDOFF
+IMPORTANT TECHNICAL FINDING
 ================================================================================
 
-7f5b02b
-Add Portable Colab manual trigger workflow
+The user's videoAI.ipynb was a blank notebook. Therefore this integration is
+currently the trigger/worker wiring, not a finished video-generation notebook.
+The actual generation still depends on:
+- ComfyUI running in the Colab runtime
+- verified Wan workflow/model assets
+- successful execution of scripts/test_generation.py
+- actual MP4/WEBM output validation
 
-86946e4
-Add Portable Colab trigger listener
+No claim is being made that a real video has been generated yet.
 
-aaa4e19
-Document generic Colab GitHub trigger protocol
+================================================================================
+TRIGGER ARCHITECTURE
+================================================================================
+
+GitHub Actions
+      |
+      v
+portable/trigger.json
+      |
+      v
+videoAI.ipynb polls GitHub
+      |
+      v
+existing OfflineMedia generation engine
+      |
+      v
+ComfyUI + NVIDIA GPU
+      |
+      v
+real video output
+
+The listener itself only reads queued requests. It does not wake a sleeping
+Colab runtime.
 
 ================================================================================
 HANDOVER TO CLAUDE
@@ -140,17 +114,18 @@ HANDOVER TO CLAUDE
 
 Claude should now:
 
-1. Read this file.
+1. Read this updated log.
 2. Read CLAUDE_WORK.txt.
 3. Read AI_HANDOFF_STATUS.txt.
-4. Inspect .github/workflows/portable-trigger.yml.
-5. Inspect portable/trigger_listener.py and portable/trigger_protocol.md.
-6. Check compatibility with the existing Portable notebook and generation
-   architecture.
-7. Add tests for trigger JSON validation/listener behavior where appropriate.
-8. Do not turn this into a second repository or introduce MES assumptions.
-9. Keep the trigger generic so it can later carry other generation parameters.
-10. Update CLAUDE_WORK.txt and AI_HANDOFF_STATUS.txt after review.
+4. Inspect the new videoAI.ipynb content.
+5. Verify the trigger parameters are compatible with the existing generation
+   request and workflow binding logic.
+6. Add focused tests for the trigger-to-generation translation if appropriate.
+7. Check whether status acknowledgement/claiming is needed to prevent the same
+   queued request from being processed repeatedly.
+8. Preserve the generic design.
+9. Do not introduce MES assumptions.
+10. Update CLAUDE_WORK.txt and AI_HANDOFF_STATUS.txt when the review is done.
 
 ================================================================================
 COMMUNICATION PROTOCOL
