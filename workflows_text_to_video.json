@@ -1,0 +1,8 @@
+{
+  "1": {
+    "inputs": {
+      "text": "A small red ball rolling slowly across a wooden table, natural lighting, simple cinematic motion"
+    },
+    "class_type": "CLIPTextEncode"
+  }
+}
