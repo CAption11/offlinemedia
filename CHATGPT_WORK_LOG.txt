@@ -15,161 +15,170 @@ Claude reads this file + CLAUDE_WORK.txt before major changes.
 ChatGPT reads both before making changes.
 Claude records its work in CLAUDE_WORK.txt.
 ChatGPT records its work here.
-GitHub commit history is the final chronological source of truth.
+GitHub commit history is the source of truth for actual repository changes.
 
 ================================================================================
-PROJECT STRUCTURE DECISION
+PROJECT STRUCTURE
 ================================================================================
 
-OfflineMedia is divided into two operational sections:
+1. MAINLOAD = downloadable/local Windows application.
+2. PORTABLE = Google Colab/GPU development and real-generation environment.
 
-1. MAINLOAD - downloadable/local Windows application.
-2. PORTABLE - Google Colab/GPU development and real-generation environment.
-
-They share the generation core. Portable is the laboratory used to prove real
-AI generation before Mainload presents that generation as an end-user feature.
+They share the generation core. Portable proves the real AI pipeline before
+Mainload exposes it as an end-user feature.
 
 ================================================================================
-PORTABLE IMPLEMENTATION STARTED - 2026-08-24
+CLAUDE HANDOFF REVIEWED - COMMIT 3417a0f
 ================================================================================
 
-ChatGPT started implementing the Portable section on the shared Claude branch.
+Claude completed the previous Portable handoff and added:
+- models/manifests/wan_2_1_1_3b.json
+- workflows/text_to_video_wan_2_1.json
+- workflows/image_to_video_wan_2_1.json
+- CLAUDE_WORK.txt updates
+- Reported 18 tests passing.
 
-Files added by ChatGPT:
+Claude handed the next task to ChatGPT: create the Colab notebook and perform
+real generation testing.
 
-portable/README.md
-- Defines Portable's purpose and boundary.
-- Documents the Colab generation flow.
-
-portable/colab_setup.py
-- Portable-specific Colab runtime entry point.
-- Installs existing requirements-colab.txt.
-- Detects nvidia-smi.
-- Does NOT download model weights.
-
-portable/diagnostics.py
-- Checks NVIDIA tooling, Git, FFmpeg, httpx, Pillow and psutil.
-
-portable/smoke_test.py
-- Reuses scripts/test_generation.py rather than duplicating the generation core.
-
-portable/requirements.txt
-- Reuses ../requirements-colab.txt.
-
-portable/colab_notebook.md
-- Colab runbook for setup, diagnostics, ComfyUI, verified workflow/model,
-  text-to-video, MP4 validation and image-to-video.
+IMPORTANT REVIEW FINDING:
+The Claude-created Wan workflows are templates and do not match the current
+official ComfyUI Wan workflow structure. In particular, current official Wan
+T2V uses UNETLoader + CLIPLoader + EmptyHunyuanLatentVideo + KSampler +
+ModelSamplingSD3, while the template used a different/older graph. Therefore
+ChatGPT is NOT treating Claude's workflow as generation-proven.
 
 ================================================================================
-AI ORCHESTRATION DECISION
+CHATGPT WORK - PORTABLE COLAB REAL-GENERATION PATH
 ================================================================================
 
-The repository already contains .github/workflows/ai-orchestration.yml and
-AI_ORCHESTRATION_SETUP.md. Claude's GitHub trigger is confirmed operational by
-the user.
+2026-08-24
 
-The agreed coordination method is the simple "check" model:
-- Neither AI is assumed to run continuously in the background.
-- GitHub is the shared source of truth.
-- Claude updates CLAUDE_WORK.txt when Claude finishes.
-- ChatGPT updates CHATGPT_WORK_LOG.txt when ChatGPT finishes.
-- The user can simply send "check" when returning.
-- ChatGPT then inspects AI_HANDOFF_STATUS.txt, both work logs and recent commits
-  and determines whether Claude has finished, without requiring the user to
-  explain what Claude did.
+1. Verified current official ComfyUI Wan 2.1 example workflows from the
+   ComfyUI examples source.
 
-AI_HANDOFF_STATUS.txt was added to make the handoff state explicit.
+Official T2V example requirements verified:
+- wan2.1_t2v_1.3B_fp16.safetensors
+- umt5_xxl_fp8_e4m3fn_scaled.safetensors
+- wan_2.1_vae.safetensors
+- official workflow uses 1.3B T2V and a current ComfyUI graph.
 
-Its fields are:
-CURRENT_AGENT
-STATUS
-TASK
-NEXT_AGENT
-LAST_COMMIT
+Official I2V example requires the 14B 480p model plus clip_vision_h.safetensors.
+I2V is therefore left as the second milestone after T2V.
 
-Supported status values:
-WORKING, READY, REVIEW, BLOCKED, FAILED, IDLE
+2. Added portable/sync_official_workflows.py
 
-When ChatGPT finishes:
-- update CHATGPT_WORK_LOG.txt
-- set CURRENT_AGENT=CLAUDE
-- set NEXT_AGENT=CLAUDE
-- set STATUS=READY or REVIEW
-- record the final commit SHA
+Purpose:
+- Fetch the current official Wan T2V and I2V workflow JSON at runtime.
+- Avoid permanently relying on an old hand-written workflow template.
+- Keep upstream workflow blobs out of the source tree when they can change.
 
-When Claude finishes:
-- update CLAUDE_WORK.txt
-- set CURRENT_AGENT=CHATGPT
-- set NEXT_AGENT=CHATGPT
-- set STATUS=READY or REVIEW
-- record the final commit SHA
+3. Added portable/OfflineMedia_Portable_Colab.ipynb
 
-Important: the status file is coordination state. It does not itself wake an AI.
+Notebook flow:
+- Detect NVIDIA GPU.
+- Clone/refresh the active OfflineMedia branch.
+- Install repository Colab dependencies and huggingface_hub.
+- Clone ComfyUI and install its requirements.
+- Download the official Wan 2.1 T2V 1.3B assets from the Comfy-Org
+  repackaged model repository.
+- Synchronize the current official T2V/I2V workflows.
+- Start ComfyUI on 127.0.0.1:8188.
+- Verify /system_stats.
+- Load the official UI workflow through OfflineMedia's Workflow converter.
+- Bind prompt, dimensions, frame count, FPS and seed.
+- Queue the workflow through the shared ComfyUIClient/ComfyUIEngine stack.
+- Download actual ComfyUI outputs.
+- Convert a returned video output to MP4 using ffmpeg when necessary.
+- Validate the MP4 with ffprobe and file-size checks.
+- Display the generated video in Colab.
+
+The notebook does NOT claim success without executing the real GPU/ComfyUI
+pipeline.
+
+4. Existing shared generation code was deliberately reused.
+
+The notebook uses:
+- app.engines.comfyui_client.ComfyUIClient
+- app.engines.comfyui_engine.ComfyUIEngine
+- app.engines.workflow.Workflow
+
+This keeps Portable and Mainload on the same generation backend.
 
 ================================================================================
-CURRENT HANDOVER TO CLAUDE
+CURRENT CHATGPT COMMITS
 ================================================================================
 
-ChatGPT has completed the initial Portable scaffolding and is handing the
-Portable task to Claude for continuation.
+8c40ab9
+Add official Wan workflow synchronizer
 
-Claude must:
+29d88dd
+Add OfflineMedia Portable Colab notebook
 
-1. Read CHATGPT_WORK_LOG.txt.
+================================================================================
+IMPORTANT VALIDATION STATUS
+================================================================================
+
+REAL COLAB GENERATION HAS NOT YET BEEN EXECUTED BY CHATGPT IN THIS SESSION.
+
+The notebook is the executable path for the real test, but a repository commit
+is not evidence of generation. The next milestone is to run the notebook in a
+real NVIDIA Colab runtime and record the actual result.
+
+Potential environment-dependent issues to validate:
+- Current ComfyUI node/API compatibility.
+- Model download availability and exact filenames.
+- GPU VRAM sufficiency.
+- Current ComfyUI front-end/backend requirements.
+- Whether the official workflow returns WEBM/WEBP and whether conversion to
+  MP4 succeeds.
+- Workflow binding after /object_info conversion.
+
+No video-generation success is claimed yet.
+
+================================================================================
+HANDOVER TO CLAUDE
+================================================================================
+
+Claude should now:
+
+1. Read this file.
 2. Read CLAUDE_WORK.txt.
-3. Read AI_HANDOFF_STATUS.txt.
-4. Inspect portable/ and existing shared generation code.
-5. Verify the actual current ComfyUI video workflow/model combination suitable
-   for Colab before hardcoding model URLs or workflow assumptions.
-6. Implement the smallest safe changes needed to make Portable capable of a
-   real Colab generation run.
-7. Do not store multi-GB model weights in Git.
-8. Do not claim generation success without a real generated MP4.
-9. Update CLAUDE_WORK.txt with completed work, tests, blockers and next steps.
-10. Update AI_HANDOFF_STATUS.txt when the Claude portion of the task is ready
-    for ChatGPT review.
-
-================================================================================
-WHAT IS STILL NOT PROVEN
-================================================================================
-
-Portable is NOT yet a proven real video-generation environment.
-
-Still requiring real execution/verification:
-1. ComfyUI installation/startup in Colab.
-2. Exact video workflow selection.
-3. Exact model selection and model files.
-4. Required custom nodes, if any.
-5. Real text-to-video generation.
-6. Real MP4 output validation.
-7. Real image-to-video generation.
-
-No claim is being made that a video has been successfully generated yet.
+3. Inspect AI_HANDOFF_STATUS.txt.
+4. Inspect portable/OfflineMedia_Portable_Colab.ipynb and
+   portable/sync_official_workflows.py.
+5. Review the mismatch between the old hand-written Wan workflows and the
+   current official ComfyUI workflows.
+6. Do NOT overwrite the official-workflow approach with guessed nodes.
+7. Check whether any existing tests should be added for the official workflow
+   synchronizer or Portable notebook orchestration.
+8. When Claude makes its next changes, update CLAUDE_WORK.txt and
+   AI_HANDOFF_STATUS.txt.
+9. If Claude can execute the notebook in an actual Colab environment, record
+   the real generation result and evidence. Otherwise clearly record the
+   blocker rather than claiming success.
 
 ================================================================================
 COMMUNICATION PROTOCOL
 ================================================================================
 
 ChatGPT -> Claude:
-- Work on the shared branch.
 - Update CHATGPT_WORK_LOG.txt.
-- Update AI_HANDOFF_STATUS.txt to Claude/READY when handing over.
+- Set AI_HANDOFF_STATUS.txt to CURRENT_AGENT=CLAUDE and NEXT_AGENT=CLAUDE.
+- Set STATUS=READY or REVIEW.
+- Record the final ChatGPT commit SHA.
 - Commit the changes.
 
 Claude -> ChatGPT:
-- Work on the shared branch.
 - Update CLAUDE_WORK.txt.
-- Update AI_HANDOFF_STATUS.txt to ChatGPT/READY or REVIEW when handing over.
+- Set AI_HANDOFF_STATUS.txt to CURRENT_AGENT=CHATGPT and NEXT_AGENT=CHATGPT.
+- Set STATUS=READY or REVIEW.
+- Record the final Claude commit SHA.
 - Commit the changes.
 
-When the user returns and says "check", ChatGPT will inspect:
-1. AI_HANDOFF_STATUS.txt
-2. CLAUDE_WORK.txt
-3. CHATGPT_WORK_LOG.txt
-4. Recent GitHub commits
-5. Relevant source/test changes
-
-The user does not need to manually explain Claude's progress.
+When the user says "check", ChatGPT inspects the status file, both work logs,
+recent commits and relevant code, then continues the next assigned task without
+requiring the user to explain the handoff.
 
 ================================================================================
 END OF CHATGPT WORK LOG
