@@ -28,113 +28,111 @@ They share the generation core. Portable proves the real AI pipeline before
 Mainload exposes it as an end-user feature.
 
 ================================================================================
-CLAUDE HANDOFF REVIEWED - COMMIT 3417a0f
+NEW GENERIC COLAB + GITHUB + TRIGGER LAYER - 2026-08-24
 ================================================================================
 
-Claude completed the previous Portable handoff and added:
-- models/manifests/wan_2_1_1_3b.json
-- workflows/text_to_video_wan_2_1.json
-- workflows/image_to_video_wan_2_1.json
-- CLAUDE_WORK.txt updates
-- Reported 18 tests passing.
+The user requested the generic Colab + GitHub + Trigger setup to be built in
+the EXISTING repository and EXISTING active branch. No new repository was
+created and no MES-specific assumptions were introduced.
 
-Claude handed the next task to ChatGPT: create the Colab notebook and perform
-real generation testing.
+Active branch:
+claude/scan-repo-chatgpt-review-6nljgh
 
-IMPORTANT REVIEW FINDING:
-The Claude-created Wan workflows are templates and do not match the current
-official ComfyUI Wan workflow structure. In particular, current official Wan
-T2V uses UNETLoader + CLIPLoader + EmptyHunyuanLatentVideo + KSampler +
-ModelSamplingSD3, while the template used a different/older graph. Therefore
-ChatGPT is NOT treating Claude's workflow as generation-proven.
+Added:
 
-================================================================================
-CHATGPT WORK - PORTABLE COLAB REAL-GENERATION PATH
-================================================================================
-
-2026-08-24
-
-1. Verified current official ComfyUI Wan 2.1 example workflows from the
-   ComfyUI examples source.
-
-Official T2V example requirements verified:
-- wan2.1_t2v_1.3B_fp16.safetensors
-- umt5_xxl_fp8_e4m3fn_scaled.safetensors
-- wan_2.1_vae.safetensors
-- official workflow uses 1.3B T2V and a current ComfyUI graph.
-
-Official I2V example requires the 14B 480p model plus clip_vision_h.safetensors.
-I2V is therefore left as the second milestone after T2V.
-
-2. Added portable/sync_official_workflows.py
+1. .github/workflows/portable-trigger.yml
 
 Purpose:
-- Fetch the current official Wan T2V and I2V workflow JSON at runtime.
-- Avoid permanently relying on an old hand-written workflow template.
-- Keep upstream workflow blobs out of the source tree when they can change.
+- Manual GitHub Actions trigger for Portable.
+- Accepts mode, prompt, width, height, frames and fps.
+- Creates a durable JSON request at portable/trigger.json.
+- Pushes the request to the active branch.
 
-3. Added portable/OfflineMedia_Portable_Colab.ipynb
+This is intentionally a trigger/queue, not a claim that GitHub Actions can
+magically execute a sleeping Google Colab session.
 
-Notebook flow:
-- Detect NVIDIA GPU.
-- Clone/refresh the active OfflineMedia branch.
-- Install repository Colab dependencies and huggingface_hub.
-- Clone ComfyUI and install its requirements.
-- Download the official Wan 2.1 T2V 1.3B assets from the Comfy-Org
-  repackaged model repository.
-- Synchronize the current official T2V/I2V workflows.
-- Start ComfyUI on 127.0.0.1:8188.
-- Verify /system_stats.
-- Load the official UI workflow through OfflineMedia's Workflow converter.
-- Bind prompt, dimensions, frame count, FPS and seed.
-- Queue the workflow through the shared ComfyUIClient/ComfyUIEngine stack.
-- Download actual ComfyUI outputs.
-- Convert a returned video output to MP4 using ffmpeg when necessary.
-- Validate the MP4 with ffprobe and file-size checks.
-- Display the generated video in Colab.
+2. portable/trigger_listener.py
 
-The notebook does NOT claim success without executing the real GPU/ComfyUI
-pipeline.
+Purpose:
+- Poll the GitHub Contents API for portable/trigger.json.
+- Wait until a request has status=queued.
+- Return the generation request to the running Colab notebook.
+- Supports private repositories through a GitHub token supplied by environment
+  variable GITHUB_TOKEN or GH_TOKEN.
 
-4. Existing shared generation code was deliberately reused.
+3. portable/trigger_protocol.md
 
-The notebook uses:
-- app.engines.comfyui_client.ComfyUIClient
-- app.engines.comfyui_engine.ComfyUIEngine
-- app.engines.workflow.Workflow
+Documents the generic architecture and the Colab listener cell.
 
-This keeps Portable and Mainload on the same generation backend.
+Architecture:
 
-================================================================================
-CURRENT CHATGPT COMMITS
-================================================================================
+GitHub Actions
+     |
+     v
+portable/trigger.json
+     |
+     v
+running Colab notebook polls GitHub
+     |
+     v
+OfflineMedia generation
+     |
+     v
+ComfyUI + NVIDIA GPU
 
-8c40ab9
-Add official Wan workflow synchronizer
-
-29d88dd
-Add OfflineMedia Portable Colab notebook
+IMPORTANT LIMITATION:
+Colab is not a permanent server. The notebook must already be running and
+polling. If its session expires, the queued request remains in GitHub until a
+new Colab session starts and reads it.
 
 ================================================================================
-IMPORTANT VALIDATION STATUS
+USER COLAB NOTEBOOK
 ================================================================================
 
-REAL COLAB GENERATION HAS NOT YET BEEN EXECUTED BY CHATGPT IN THIS SESSION.
+The user has a separate Colab notebook named:
+videoAI.ipynb
 
-The notebook is the executable path for the real test, but a repository commit
-is not evidence of generation. The next milestone is to run the notebook in a
-real NVIDIA Colab runtime and record the actual result.
+Shared link supplied by the user:
+https://colab.research.google.com/drive/1nkkG0e6-QMzI9m6gA4vi_OIdBaATgtW0?usp=sharing
 
-Potential environment-dependent issues to validate:
-- Current ComfyUI node/API compatibility.
-- Model download availability and exact filenames.
-- GPU VRAM sufficiency.
-- Current ComfyUI front-end/backend requirements.
-- Whether the official workflow returns WEBM/WEBP and whether conversion to
-  MP4 succeeds.
-- Workflow binding after /object_info conversion.
+The GitHub connector cannot directly edit the Drive-hosted notebook. The
+repository already contains OfflineMedia_Portable_Colab.ipynb, but the user's
+specific videoAI.ipynb should be saved into this active GitHub branch through
+Colab's File -> Save a copy in GitHub if they want that exact notebook
+version-controlled.
 
-No video-generation success is claimed yet.
+Recommended repository path:
+portable/videoAI.ipynb
+
+The trigger listener cell is documented in portable/trigger_protocol.md.
+
+================================================================================
+PREVIOUS PORTABLE WORK
+================================================================================
+
+Claude previously added Wan workflow/model templates and reported 18 tests
+passing. ChatGPT reviewed those workflows and found they were not equivalent
+to the current official ComfyUI Wan workflow structure.
+
+ChatGPT then added:
+- portable/sync_official_workflows.py
+- portable/OfflineMedia_Portable_Colab.ipynb
+
+The notebook uses the shared ComfyUI client/engine and performs real output
+validation. Real GPU generation has NOT yet been executed in this session.
+
+================================================================================
+CURRENT CHATGPT COMMITS FOR THIS HANDOFF
+================================================================================
+
+7f5b02b
+Add Portable Colab manual trigger workflow
+
+86946e4
+Add Portable Colab trigger listener
+
+aaa4e19
+Document generic Colab GitHub trigger protocol
 
 ================================================================================
 HANDOVER TO CLAUDE
@@ -144,19 +142,15 @@ Claude should now:
 
 1. Read this file.
 2. Read CLAUDE_WORK.txt.
-3. Inspect AI_HANDOFF_STATUS.txt.
-4. Inspect portable/OfflineMedia_Portable_Colab.ipynb and
-   portable/sync_official_workflows.py.
-5. Review the mismatch between the old hand-written Wan workflows and the
-   current official ComfyUI workflows.
-6. Do NOT overwrite the official-workflow approach with guessed nodes.
-7. Check whether any existing tests should be added for the official workflow
-   synchronizer or Portable notebook orchestration.
-8. When Claude makes its next changes, update CLAUDE_WORK.txt and
-   AI_HANDOFF_STATUS.txt.
-9. If Claude can execute the notebook in an actual Colab environment, record
-   the real generation result and evidence. Otherwise clearly record the
-   blocker rather than claiming success.
+3. Read AI_HANDOFF_STATUS.txt.
+4. Inspect .github/workflows/portable-trigger.yml.
+5. Inspect portable/trigger_listener.py and portable/trigger_protocol.md.
+6. Check compatibility with the existing Portable notebook and generation
+   architecture.
+7. Add tests for trigger JSON validation/listener behavior where appropriate.
+8. Do not turn this into a second repository or introduce MES assumptions.
+9. Keep the trigger generic so it can later carry other generation parameters.
+10. Update CLAUDE_WORK.txt and AI_HANDOFF_STATUS.txt after review.
 
 ================================================================================
 COMMUNICATION PROTOCOL
