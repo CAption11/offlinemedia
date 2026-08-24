@@ -12,6 +12,10 @@ dependencies = [
     "httpx>=0.27,<1",
 ]
 
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
 [project.scripts]
 offlinemedia = "app.__main__:main"
 
