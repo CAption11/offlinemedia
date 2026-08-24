@@ -17,6 +17,7 @@ import time
 import urllib.error
 import urllib.request
 from pathlib import Path
+from typing import Optional
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_COMFY_DIR = Path("/content/ComfyUI")
@@ -95,17 +96,16 @@ def start_comfyui(
     port: int = 8188,
     log_path: Path = Path("/content/comfyui.log"),
     timeout_seconds: int = 240,
-) -> subprocess.Popen[bytes]:
-    """Start ComfyUI in the background and wait until it answers.
+) -> Optional[subprocess.Popen[bytes]]:
+    """Start ComfyUI, or reuse an already healthy instance.
 
-    Raises RuntimeError with the tail of the server log when it never becomes
-    ready, so a Colab cell shows the real reason instead of a bare timeout.
+    Colab users commonly re-run cells without restarting the runtime. If a
+    healthy ComfyUI is already listening, reuse it instead of trying to start
+    a second server on the same port.
     """
     if is_ready(host, port):
-        raise RuntimeError(
-            f"Something is already listening on {host}:{port}. "
-            "Restart the runtime before starting another ComfyUI."
-        )
+        print(f"ComfyUI already running and ready on {host}:{port}; reusing it.")
+        return None
     log_file = log_path.open("wb")
     process = subprocess.Popen(
         [sys.executable, str(comfy_dir / "main.py"), "--listen", host, "--port", str(port)],
@@ -144,8 +144,8 @@ def bootstrap(
     host: str = "127.0.0.1",
     port: int = 8188,
     download_assets: bool = True,
-) -> subprocess.Popen[bytes]:
-    """Run the full bootstrap and return the running ComfyUI process."""
+) -> Optional[subprocess.Popen[bytes]]:
+    """Run the full bootstrap and return the new process, if one was started."""
     require_gpu()
     install_comfyui(comfy_dir)
     if download_assets:
