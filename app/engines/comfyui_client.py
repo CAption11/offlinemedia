@@ -25,26 +25,12 @@ class ComfyUIError(RuntimeError):
 
 
 class ComfyUIClient:
-    """Small dependency-free HTTP client for a local ComfyUI server.
+    """Small dependency-free HTTP client for a local ComfyUI server."""
 
-    ``base_url`` is the preferred form. ``host`` and ``port`` are accepted as
-    well because they are convenient for CLI/Colab usage.
-    """
-
-    def __init__(
-        self,
-        base_url: str | None = None,
-        timeout: float = 10.0,
-        *,
-        host: str | None = None,
-        port: int = 8188,
-    ) -> None:
+    def __init__(self, base_url: str | None = None, timeout: float = 10.0, *, host: str | None = None, port: int = 8188) -> None:
         if base_url is None:
             host = host or "127.0.0.1"
-            if "://" in host:
-                base_url = host
-            else:
-                base_url = f"http://{host}:{port}"
+            base_url = host if "://" in host else f"http://{host}:{port}"
         self.base_url = base_url.rstrip("/")
         self.timeout = max(1.0, timeout)
         self.client_id = str(uuid.uuid4())
@@ -64,6 +50,8 @@ class ComfyUIClient:
             raise ComfyUIError(f"HTTP {exc.code} from ComfyUI {path}: {body[:500]}") from exc
         except URLError as exc:
             raise ComfyUIError(f"Cannot reach ComfyUI at {self.base_url}: {exc.reason}") from exc
+        except TimeoutError as exc:
+            raise ComfyUIError(f"ComfyUI request timed out: {path}") from exc
 
     def _request_json(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
         raw = self._request(path, method, payload)
@@ -103,34 +91,26 @@ class ComfyUIClient:
         boundary = f"----OfflineMedia{uuid.uuid4().hex}"
         filename = path.name
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
-        file_bytes = path.read_bytes()
         parts = [
             (
-                f"--{boundary}\r\n"
-                f"Content-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\n"
+                f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\n"
                 f"Content-Type: {content_type}\r\n\r\n"
-            ).encode("utf-8"),
-            file_bytes,
+            ).encode(),
+            path.read_bytes(),
             (
-                f"\r\n--{boundary}\r\n"
-                "Content-Disposition: form-data; name=\"overwrite\"\r\n\r\n"
-                f"{str(overwrite).lower()}\r\n"
-                f"--{boundary}--\r\n"
-            ).encode("utf-8"),
+                f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\n"
+                f"{str(overwrite).lower()}\r\n--{boundary}--\r\n"
+            ).encode(),
         ]
         request = Request(
-            f"{self.base_url}/upload/image",
-            data=b"".join(parts),
-            headers={
-                "Content-Type": f"multipart/form-data; boundary={boundary}",
-                "Accept": "application/json",
-            },
+            f"{self.base_url}/upload/image", data=b"".join(parts),
+            headers={"Content-Type": f"multipart/form-data; boundary={boundary}", "Accept": "application/json"},
             method="POST",
         )
         try:
             with urlopen(request, timeout=max(self.timeout, 30.0)) as response:
                 result = json.loads(response.read().decode("utf-8"))
-        except (HTTPError, URLError, json.JSONDecodeError) as exc:
+        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError) as exc:
             raise ComfyUIError(f"ComfyUI image upload failed: {exc}") from exc
         if not isinstance(result, dict) or not result.get("name"):
             raise ComfyUIError(f"ComfyUI image upload failed: {result}")
@@ -149,12 +129,7 @@ class ComfyUIClient:
         except ComfyUIError:
             return False
 
-    def wait_for_completion(
-        self,
-        prompt_id: str,
-        poll_interval: float = 0.75,
-        timeout: float = 3600,
-    ) -> dict[str, Any]:
+    def wait_for_completion(self, prompt_id: str, poll_interval: float = 0.75, timeout: float = 3600) -> dict[str, Any]:
         started = time.monotonic()
         while time.monotonic() - started < timeout:
             history = self.get_history(prompt_id)
@@ -162,7 +137,10 @@ class ComfyUIClient:
             if isinstance(result, dict):
                 status = result.get("status", {})
                 if isinstance(status, dict):
-                    if status.get("status_str") == "error" or status.get("completed") is False and status.get("messages"):
+                    status_str = status.get("status_str")
+                    if status_str in {"error", "failed"}:
+                        raise ComfyUIError(f"ComfyUI generation failed: {status}")
+                    if status.get("completed") is False and status.get("messages"):
                         raise ComfyUIError(f"ComfyUI generation failed: {status}")
                 return result
             time.sleep(max(0.1, poll_interval))
@@ -175,13 +153,16 @@ class ComfyUIClient:
         params = {"filename": filename, "type": item.get("type", "output")}
         if item.get("subfolder"):
             params["subfolder"] = item["subfolder"]
-        url = f"{self.base_url}/view?{urlencode(params)}"
         destination.parent.mkdir(parents=True, exist_ok=True)
-        request = Request(url, headers={"Accept": "application/octet-stream"}, method="GET")
+        request = Request(f"{self.base_url}/view?{urlencode(params)}", headers={"Accept": "application/octet-stream"})
+        temporary = destination.with_suffix(destination.suffix + ".part")
         try:
-            with urlopen(request, timeout=max(self.timeout, 30.0)) as response:
-                destination.write_bytes(response.read())
-        except (HTTPError, URLError) as exc:
+            with urlopen(request, timeout=max(self.timeout, 30.0)) as response, temporary.open("wb") as output:
+                while chunk := response.read(1024 * 1024):
+                    output.write(chunk)
+            temporary.replace(destination)
+        except (HTTPError, URLError, TimeoutError) as exc:
+            temporary.unlink(missing_ok=True)
             raise ComfyUIError(f"Unable to download ComfyUI output {filename}: {exc}") from exc
         return destination
 
@@ -194,12 +175,8 @@ class ComfyUIClient:
             for key in ("images", "gifs", "videos", "audio"):
                 values = node.get(key, []) or []
                 if isinstance(values, list):
-                    items.extend(item for item in values if isinstance(item, dict))
-        return [item for item in items if item.get("filename")]
-
-    @staticmethod
-    def extract_outputs(history: dict[str, Any]) -> list[Path]:
-        return [Path(item["filename"]) for item in ComfyUIClient.output_items(history)]
+                    items.extend(item for item in values if isinstance(item, dict) and item.get("filename"))
+        return items
 
     def load_workflow(self, path: Path) -> dict[str, Any]:
         try:
@@ -215,6 +192,6 @@ class ComfyUIClient:
             workflow = self.load_workflow(workflow_path)
             job_id = self.queue_prompt(workflow)
             history = self.wait_for_completion(job_id)
-            return GenerationResult(True, self.extract_outputs(history), job_id=job_id)
+            return GenerationResult(True, [Path(item["filename"]) for item in self.output_items(history)], job_id=job_id)
         except Exception as exc:
             return GenerationResult(False, error=str(exc))
