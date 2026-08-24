@@ -1,0 +1,2 @@
+# Core dependencies for OfflineMedia (no UI framework)
+# Used for testing and backend operations
