@@ -12,6 +12,7 @@ from portable.trigger_listener import (
     TriggerClaimConflict,
     TriggerNotFound,
     claim_trigger,
+    complete_trigger,
     get_trigger,
     read_trigger_or_none,
     wait_for_trigger,
@@ -362,3 +363,65 @@ class TestClaimTrigger:
 
         result = wait_for_trigger(poll_seconds=1, skip_job_ids={"done"})
         assert result["job_id"] == "fresh"
+
+
+class TestCompleteTrigger:
+    """A finished job must leave an unambiguous state in the queue."""
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    def test_completion_marks_job_and_stamps_finished_at(
+        self, mock_urlopen: mock.MagicMock
+    ) -> None:
+        put_response = mock.MagicMock()
+        put_response.read.return_value = b"{}"
+        put_response.headers = {}
+        put_response.__enter__.return_value = put_response
+        put_response.__exit__.return_value = False
+        mock_urlopen.side_effect = [
+            _contents_response({"job_id": "123", "status": "running"}),
+            put_response,
+        ]
+
+        finished = complete_trigger("123", token="t")
+
+        assert finished["status"] == "completed"
+        assert finished["finished_at"]
+        written = json.loads(
+            base64.b64decode(json.loads(mock_urlopen.call_args[0][0].data)["content"])
+        )
+        assert written["status"] == "completed"
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    def test_failure_status_is_recorded_with_detail(
+        self, mock_urlopen: mock.MagicMock
+    ) -> None:
+        put_response = mock.MagicMock()
+        put_response.read.return_value = b"{}"
+        put_response.headers = {}
+        put_response.__enter__.return_value = put_response
+        put_response.__exit__.return_value = False
+        mock_urlopen.side_effect = [
+            _contents_response({"job_id": "123", "status": "running"}),
+            put_response,
+        ]
+
+        finished = complete_trigger("123", status="failed", token="t", detail="exit code 1")
+
+        assert finished["status"] == "failed"
+        assert finished["detail"] == "exit code 1"
+
+    def test_arbitrary_status_is_refused(self) -> None:
+        with pytest.raises(ValueError):
+            complete_trigger("123", status="probably-fine", token="t")
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    def test_will_not_overwrite_a_different_job(
+        self, mock_urlopen: mock.MagicMock
+    ) -> None:
+        """A newer request must not be clobbered by a late finishing worker."""
+        mock_urlopen.return_value = _contents_response(
+            {"job_id": "456", "status": "queued"}
+        )
+
+        with pytest.raises(TriggerClaimConflict):
+            complete_trigger("123", token="t")

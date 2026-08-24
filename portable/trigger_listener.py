@@ -13,6 +13,7 @@ import os
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -152,6 +153,47 @@ def wait_for_trigger(
         if timeout_seconds is not None and time.monotonic() - started >= timeout_seconds:
             raise TimeoutError("Timed out waiting for a Portable Colab trigger.")
         time.sleep(max(2, poll_seconds))
+
+
+def complete_trigger(
+    job_id: str,
+    *,
+    status: str = "completed",
+    repo: str = DEFAULT_REPO,
+    branch: str = DEFAULT_BRANCH,
+    path: str = DEFAULT_PATH,
+    token: str,
+    detail: str | None = None,
+) -> dict[str, Any]:
+    """Mark a finished job completed or failed so the queue stops being ambiguous.
+
+    Without this a request stays "running" forever after generation, so a later
+    reader cannot tell a job still in flight from one that finished. Re-reads
+    the blob first so the write carries a current SHA, and refuses to overwrite
+    a different job than the one that was claimed.
+    """
+    if status not in ("completed", "failed"):
+        raise ValueError("status must be 'completed' or 'failed'.")
+    trigger, sha = get_trigger(repo, branch, path, token)
+    if str(trigger.get("job_id")) != str(job_id):
+        raise TriggerClaimConflict(
+            f"Queue now holds job {trigger.get('job_id')!r}, not {job_id!r}; refusing to overwrite."
+        )
+    finished = dict(trigger, status=status)
+    if detail:
+        finished["detail"] = detail
+    finished["finished_at"] = datetime.now(timezone.utc).isoformat()
+    url = f"https://api.github.com/repos/{repo}/contents/{path}"
+    payload = {
+        "message": f"Mark Portable Colab job {job_id} {status}",
+        "content": base64.b64encode(
+            (json.dumps(finished, indent=2) + "\n").encode("utf-8")
+        ).decode("ascii"),
+        "sha": sha,
+        "branch": branch,
+    }
+    _request(url, token, method="PUT", payload=payload)
+    return finished
 
 
 def read_trigger_or_none(

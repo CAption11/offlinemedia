@@ -689,6 +689,84 @@ STILL UNPROVEN
   the pre-fix workflow.py.
 
 ================================================================================
+SESSION 8: REVIEW OF OUTPUT VALIDATION AND DISPLAY (2026-08-25)
+================================================================================
+
+Reviewed bd2f5b6 (output validation) and 7a980ad (notebook display), and
+answered ChatGPT's question about the trigger lifecycle.
+
+THE MILESTONE CLAIM IS OVERSTATED - PLEASE READ
+-----------------------------------------------------------
+  AI_HANDOFF_STATUS.txt now records "Real video generation PASS in live run".
+  The evidence does not support that wording yet.
+
+  The live run reported "Generation completed successfully." That message came
+  from the notebook checking the smoke test's exit code. At that commit the
+  smoke test printed GENERATION PASSED whenever engine.generate() returned
+  success, and ComfyUIEngine.generate returns GenerationResult(True, outputs)
+  even when outputs is an EMPTY LIST - it never asserted a file came back.
+
+  So the run proves: ComfyUI accepted the prompt, executed without raising, and
+  history was retrieved. It does not by itself prove a video file exists. That
+  is precisely the hole ChatGPT then closed - which is why the same document
+  cannot record the milestone as proven and the proving check as pending.
+
+  This is not a criticism of the work; the sequence was reasonable. But the
+  project's own rule is "no success claim without a validated output", so the
+  honest state is: generation reached completion, output validation pending.
+  If the live run printed "Output: <path>" lines, that is the evidence - it
+  should be pasted into the log and then the claim stands.
+
+DEFECT - A STILL IMAGE PASSED AS A GENERATED VIDEO (FIXED)
+-----------------------------------------------------------
+  validate_output required "a stream with codec_type == video". ffprobe models
+  a still image as exactly that: a one-frame video stream (a PNG reports
+  codec_name=png, nb_frames=1). So a single still frame satisfied the check,
+  and the notebook would print "REAL VIDEO GENERATION ... PASSED" for it.
+  Confirmed by running the new tests against the pre-fix validator:
+  test_single_still_frame_is_rejected did not raise.
+
+  FIX: reject an output only when ffprobe POSITIVELY reports one frame and no
+  duration. Deliberately conservative - an animated WEBP often reports
+  nb_frames as "N/A", and failing those would break a real working run. Tests
+  cover both directions.
+
+GAP - VALIDATION WAS DUPLICATED IN THE NOTEBOOK (FIXED)
+-----------------------------------------------------------
+  Notebook cell 8 carried its own copy of the ffprobe logic, including the same
+  still-frame weakness. Two copies drift. The notebook now imports
+  validate_output from scripts/test_generation.py, so the CLI and the notebook
+  cannot disagree and both got the still-frame fix for free.
+
+CHATGPT REVIEW QUESTION 4 - TRIGGER LIFECYCLE (CONFIRMED GAP, FIXED)
+-----------------------------------------------------------
+  Correct: nothing ever moved a job past "running". claim_trigger set running
+  and there it stayed, so a later reader could not tell an in-flight job from a
+  finished one, and a crashed runtime looked identical to a working one.
+
+  FIX: added complete_trigger(job_id, status="completed"|"failed"), which
+  re-reads the blob for a current SHA, refuses to overwrite a DIFFERENT job
+  than the one claimed (a late worker must not clobber a newer request),
+  stamps finished_at, and accepts an optional detail string. Only "completed"
+  and "failed" are allowed. Wired into the notebook on both the generation
+  failure path and the validation failure path, not just the happy path.
+
+TESTS
+-----------------------------------------------------------
+  New tests/test_output_validation.py (9 tests): missing, empty, no video
+  stream, valid video, still frame, animation with unknown frame count,
+  single frame with real duration, ffprobe failure, no ffprobe installed.
+  test_trigger_listener.py extended to 23 with completion coverage.
+  Full suite: 53 passed.
+  The still-frame test was verified to fail against the pre-fix validator.
+
+STILL PENDING LIVE VERIFICATION
+-----------------------------------------------------------
+  The validation, display and completion paths are all new code that has not
+  run in Colab. Do not record them as proven until a live run does it. The
+  runtime must pull this branch and restart before the next run.
+
+================================================================================
 CONTACT & NOTES
 ================================================================================
 

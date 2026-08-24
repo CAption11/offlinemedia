@@ -52,15 +52,45 @@ def validate_output(path: Path) -> dict:
     if video is None:
         raise RuntimeError(f"No video stream found in output: {path}")
 
+    duration = (probe.get("format") or {}).get("duration")
     info.update({
         "codec": video.get("codec_name"),
         "width": video.get("width"),
         "height": video.get("height"),
         "frames": video.get("nb_frames"),
         "fps": video.get("r_frame_rate"),
-        "duration": (probe.get("format") or {}).get("duration"),
+        "duration": duration,
     })
+
+    # ffprobe reports a still image as a video stream with a single frame, so
+    # "has a video stream" alone would let a lone PNG pass as a generated
+    # video. Reject only when the file is provably single-frame: an animation
+    # whose frame count ffprobe cannot determine must not be failed here.
+    if _is_single_frame(video, duration):
+        raise RuntimeError(
+            f"Output is a single still frame, not a video: {path} "
+            f"(codec={video.get('codec_name')}, frames={video.get('nb_frames')})"
+        )
     return info
+
+
+def _as_number(value: object) -> float | None:
+    """Parse an ffprobe field, which may be absent, 'N/A' or a numeric string."""
+    if value in (None, "", "N/A"):
+        return None
+    try:
+        return float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+
+
+def _is_single_frame(video: dict, duration: object) -> bool:
+    """Return True only when ffprobe positively reports one frame and no runtime."""
+    frames = _as_number(video.get("nb_frames"))
+    if frames is None or frames > 1:
+        return False
+    seconds = _as_number(duration)
+    return seconds is None or seconds <= 0
 
 
 def main() -> int:
