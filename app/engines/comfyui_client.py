@@ -1,7 +1,8 @@
-"""Small local ComfyUI API client.
+"""Robust local ComfyUI HTTP client.
 
-The client talks only to a local ComfyUI server. It handles queueing, status,
-input-image upload and copying generated files back into OfflineMedia output.
+The client talks only to a configured ComfyUI server. It supports queueing,
+health checks, workflow metadata, image upload, progress polling and output
+retrieval. It deliberately has no cloud dependency.
 """
 
 from __future__ import annotations
@@ -12,37 +13,75 @@ import time
 import uuid
 from pathlib import Path
 from typing import Any
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
 from app.core.generation import GenerationRequest, GenerationResult
 
 
-class ComfyUIClient:
-    """HTTP client for a locally running ComfyUI server."""
+class ComfyUIError(RuntimeError):
+    """A ComfyUI communication or protocol error."""
 
-    def __init__(self, base_url: str = "http://127.0.0.1:8188", timeout: float = 5.0) -> None:
+
+class ComfyUIClient:
+    """Small dependency-free HTTP client for a local ComfyUI server.
+
+    ``base_url`` is the preferred form. ``host`` and ``port`` are accepted as
+    well because they are convenient for CLI/Colab usage.
+    """
+
+    def __init__(
+        self,
+        base_url: str | None = None,
+        timeout: float = 10.0,
+        *,
+        host: str | None = None,
+        port: int = 8188,
+    ) -> None:
+        if base_url is None:
+            host = host or "127.0.0.1"
+            if "://" in host:
+                base_url = host
+            else:
+                base_url = f"http://{host}:{port}"
         self.base_url = base_url.rstrip("/")
-        self.timeout = timeout
+        self.timeout = max(1.0, timeout)
         self.client_id = str(uuid.uuid4())
 
-    def _request_json(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _request(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> bytes:
         data = None
-        headers: dict[str, str] = {}
+        headers = {"Accept": "application/json"}
         if payload is not None:
             data = json.dumps(payload).encode("utf-8")
             headers["Content-Type"] = "application/json"
         request = Request(f"{self.base_url}{path}", data=data, headers=headers, method=method)
-        with urlopen(request, timeout=self.timeout) as response:
-            raw = response.read().decode("utf-8")
-            return json.loads(raw) if raw else {}
+        try:
+            with urlopen(request, timeout=self.timeout) as response:
+                return response.read()
+        except HTTPError as exc:
+            body = exc.read().decode("utf-8", errors="replace")
+            raise ComfyUIError(f"HTTP {exc.code} from ComfyUI {path}: {body[:500]}") from exc
+        except URLError as exc:
+            raise ComfyUIError(f"Cannot reach ComfyUI at {self.base_url}: {exc.reason}") from exc
+
+    def _request_json(self, path: str, method: str = "GET", payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        raw = self._request(path, method, payload)
+        if not raw:
+            return {}
+        try:
+            data = json.loads(raw.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ComfyUIError(f"ComfyUI returned invalid JSON from {path}") from exc
+        if not isinstance(data, dict):
+            raise ComfyUIError(f"Unexpected JSON response from {path}")
+        return data
 
     def is_available(self) -> bool:
         try:
             self._request_json("/system_stats")
             return True
-        except (OSError, URLError, ValueError):
+        except (ComfyUIError, OSError, ValueError):
             return False
 
     def system_stats(self) -> dict[str, Any]:
@@ -53,73 +92,109 @@ class ComfyUIClient:
 
     def queue_prompt(self, workflow: dict[str, Any]) -> str:
         data = self._request_json("/prompt", "POST", {"prompt": workflow, "client_id": self.client_id})
-        if "prompt_id" not in data:
-            raise RuntimeError(f"ComfyUI rejected the workflow: {data}")
-        return str(data["prompt_id"])
+        prompt_id = data.get("prompt_id")
+        if not prompt_id:
+            raise ComfyUIError(f"ComfyUI rejected the workflow: {data}")
+        return str(prompt_id)
 
     def upload_image(self, path: Path, overwrite: bool = False) -> str:
+        if not path.is_file():
+            raise FileNotFoundError(path)
         boundary = f"----OfflineMedia{uuid.uuid4().hex}"
         filename = path.name
         content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
         file_bytes = path.read_bytes()
         parts = [
-            f"--{boundary}\r\nContent-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\nContent-Type: {content_type}\r\n\r\n".encode(),
+            (
+                f"--{boundary}\r\n"
+                f"Content-Disposition: form-data; name=\"image\"; filename=\"{filename}\"\r\n"
+                f"Content-Type: {content_type}\r\n\r\n"
+            ).encode("utf-8"),
             file_bytes,
-            f"\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"overwrite\"\r\n\r\n{str(overwrite).lower()}\r\n".encode(),
-            f"--{boundary}--\r\n".encode(),
+            (
+                f"\r\n--{boundary}\r\n"
+                "Content-Disposition: form-data; name=\"overwrite\"\r\n\r\n"
+                f"{str(overwrite).lower()}\r\n"
+                f"--{boundary}--\r\n"
+            ).encode("utf-8"),
         ]
         request = Request(
             f"{self.base_url}/upload/image",
             data=b"".join(parts),
-            headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+            headers={
+                "Content-Type": f"multipart/form-data; boundary={boundary}",
+                "Accept": "application/json",
+            },
             method="POST",
         )
-        with urlopen(request, timeout=max(self.timeout, 30.0)) as response:
-            result = json.loads(response.read().decode("utf-8"))
-        if not result.get("name"):
-            raise RuntimeError(f"ComfyUI image upload failed: {result}")
+        try:
+            with urlopen(request, timeout=max(self.timeout, 30.0)) as response:
+                result = json.loads(response.read().decode("utf-8"))
+        except (HTTPError, URLError, json.JSONDecodeError) as exc:
+            raise ComfyUIError(f"ComfyUI image upload failed: {exc}") from exc
+        if not isinstance(result, dict) or not result.get("name"):
+            raise ComfyUIError(f"ComfyUI image upload failed: {result}")
         return str(result["name"])
 
     def get_history(self, prompt_id: str) -> dict[str, Any]:
         return self._request_json(f"/history/{prompt_id}")
 
+    def get_queue(self) -> dict[str, Any]:
+        return self._request_json("/queue")
+
     def interrupt(self) -> bool:
         try:
             self._request_json("/interrupt", "POST", {})
             return True
-        except (OSError, URLError, ValueError):
+        except ComfyUIError:
             return False
 
-    def wait_for_completion(self, prompt_id: str, poll_interval: float = 0.5, timeout: float = 3600) -> dict[str, Any]:
+    def wait_for_completion(
+        self,
+        prompt_id: str,
+        poll_interval: float = 0.75,
+        timeout: float = 3600,
+    ) -> dict[str, Any]:
         started = time.monotonic()
         while time.monotonic() - started < timeout:
             history = self.get_history(prompt_id)
-            if prompt_id in history:
-                result = history[prompt_id]
+            result = history.get(prompt_id)
+            if isinstance(result, dict):
                 status = result.get("status", {})
-                if status.get("status_str") == "error":
-                    raise RuntimeError(f"ComfyUI generation failed: {status}")
+                if isinstance(status, dict):
+                    if status.get("status_str") == "error" or status.get("completed") is False and status.get("messages"):
+                        raise ComfyUIError(f"ComfyUI generation failed: {status}")
                 return result
-            time.sleep(poll_interval)
+            time.sleep(max(0.1, poll_interval))
         raise TimeoutError(f"ComfyUI job {prompt_id} timed out after {timeout:.0f}s")
 
     def download_output(self, item: dict[str, Any], destination: Path) -> Path:
-        params = {"filename": item.get("filename", ""), "type": item.get("type", "output")}
+        filename = item.get("filename")
+        if not filename:
+            raise ComfyUIError("ComfyUI output item has no filename")
+        params = {"filename": filename, "type": item.get("type", "output")}
         if item.get("subfolder"):
             params["subfolder"] = item["subfolder"]
         url = f"{self.base_url}/view?{urlencode(params)}"
         destination.parent.mkdir(parents=True, exist_ok=True)
-        request = Request(url, method="GET")
-        with urlopen(request, timeout=max(self.timeout, 30.0)) as response:
-            destination.write_bytes(response.read())
+        request = Request(url, headers={"Accept": "application/octet-stream"}, method="GET")
+        try:
+            with urlopen(request, timeout=max(self.timeout, 30.0)) as response:
+                destination.write_bytes(response.read())
+        except (HTTPError, URLError) as exc:
+            raise ComfyUIError(f"Unable to download ComfyUI output {filename}: {exc}") from exc
         return destination
 
     @staticmethod
     def output_items(history: dict[str, Any]) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         for node in history.get("outputs", {}).values():
+            if not isinstance(node, dict):
+                continue
             for key in ("images", "gifs", "videos", "audio"):
-                items.extend(node.get(key, []) or [])
+                values = node.get(key, []) or []
+                if isinstance(values, list):
+                    items.extend(item for item in values if isinstance(item, dict))
         return [item for item in items if item.get("filename")]
 
     @staticmethod
@@ -127,8 +202,13 @@ class ComfyUIClient:
         return [Path(item["filename"]) for item in ComfyUIClient.output_items(history)]
 
     def load_workflow(self, path: Path) -> dict[str, Any]:
-        with path.open("r", encoding="utf-8") as handle:
-            return json.load(handle)
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ComfyUIError(f"Unable to load workflow {path}") from exc
+        if not isinstance(data, dict):
+            raise ComfyUIError("Workflow must be a JSON object")
+        return data
 
     def generate(self, request: GenerationRequest, workflow_path: Path) -> GenerationResult:
         try:
