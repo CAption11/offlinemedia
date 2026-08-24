@@ -41,6 +41,27 @@ class Workflow:
         return isinstance(options, dict) and bool(options.get("control_after_generate"))
 
     @classmethod
+    def _with_seed_controls(
+        cls,
+        names: list[str],
+        required: dict[str, Any],
+        optional: dict[str, Any],
+    ) -> list[str]:
+        """Insert the UI-only control_after_generate widget after each seed input.
+
+        widgets_values carries a value for that widget even though it is not a
+        real node input, so any name list zipped against widgets_values must
+        account for it or every later value shifts left. Applied to whichever
+        name list is in use, since both orderings hit the same skew.
+        """
+        expanded: list[str] = []
+        for name in names:
+            expanded.append(name)
+            if cls._has_control_after_generate(required.get(name, optional.get(name))):
+                expanded.append("control_after_generate")
+        return expanded
+
+    @classmethod
     def from_ui_workflow(cls, data: dict[str, Any], object_info: dict[str, Any]) -> "Workflow":
         links = {
             str(link[0]): link
@@ -75,13 +96,7 @@ class Workflow:
             # shift every subsequent value left and send "randomize" to steps.
             # Insert it using the authoritative node metadata instead of
             # hard-coding KSampler node IDs or widget positions.
-            expanded_names: list[str] = []
-            for name in ordered_names:
-                expanded_names.append(name)
-                definition_for_name = required.get(name, optional.get(name))
-                if self_has_control := cls._has_control_after_generate(definition_for_name):
-                    if "control_after_generate" not in expanded_names:
-                        expanded_names.append("control_after_generate")
+            expanded_names = cls._with_seed_controls(ordered_names, required, optional)
 
             api_inputs: dict[str, Any] = {}
             linked_names: set[str] = set()
@@ -109,13 +124,21 @@ class Workflow:
                         api_inputs[name] = value
             else:
                 widgets = list(node.get("widgets_values", []) or [])
-                widget_names = [
-                    str(ui_input.get("name"))
-                    for ui_input in (node.get("inputs", []) or [])
-                    if isinstance(ui_input, dict)
-                    and ui_input.get("link") is None
-                    and ui_input.get("name")
-                ]
+                # Newer frontends also export the widget inputs here, not just
+                # the linked ones. That list needs the same seed-control
+                # expansion as the object_info ordering, otherwise this path
+                # silently reintroduces the shift it is meant to prevent.
+                widget_names = cls._with_seed_controls(
+                    [
+                        str(ui_input.get("name"))
+                        for ui_input in (node.get("inputs", []) or [])
+                        if isinstance(ui_input, dict)
+                        and ui_input.get("link") is None
+                        and ui_input.get("name")
+                    ],
+                    required,
+                    optional,
+                )
                 names = widget_names or [name for name in expanded_names if name not in linked_names]
                 for name, value in zip(names, widgets):
                     if name not in linked_names:

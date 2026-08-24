@@ -617,6 +617,78 @@ STILL NOT PROVEN
   evidence milestone. Configuration is not generation.
 
 ================================================================================
+SESSION 7: REVIEW OF THE SEED-WIDGET FIX AFTER THE LIVE COLAB RUN (2026-08-24)
+================================================================================
+
+CONTEXT: the user ran videoAI.ipynb on a live Colab GPU. The runtime and
+ComfyUI bootstrap worked and the run reached the real generation API, which
+rejected it with HTTP 400: KSampler input "steps" received "randomize".
+ChatGPT diagnosed the UI-to-API widget shift and fixed it in 57d9805 with a
+regression test in b98f3d3.
+
+The diagnosis is correct and the root cause is right. The fix, however, only
+covered one of the two code paths that consume widgets_values.
+
+DEFECT - THE FIX WAS BYPASSED ON A SECOND EXPORT SHAPE (FIXED)
+-----------------------------------------------------------
+  In from_ui_workflow the name list is chosen as:
+      names = widget_names or [... expanded_names ...]
+  widget_names comes from node["inputs"] entries with link=None. Newer ComfyUI
+  frontends export the widget inputs there, not only the linked ones. When they
+  do, widget_names is non-empty and takes priority, so expanded_names - and
+  with it the whole control_after_generate insertion - is skipped.
+
+  Reproduced before fixing, on the same KSampler widget sequence:
+      seed  = 123
+      steps = 'randomize'      <-- the exact HTTP 400 the user hit
+      cfg   = 30
+
+  So the original failure would have returned as soon as the Colab frontend
+  exported the workflow in that shape.
+
+  FIX: extracted the insertion into Workflow._with_seed_controls() and applied
+  it to BOTH name lists. Verified both export shapes now yield
+  steps=30, cfg=6, sampler_name=uni_pc, scheduler=simple, denoise=1.
+
+DEFECT - ONLY ONE SEED CONTROL WAS EVER INSERTED PER NODE (FIXED)
+-----------------------------------------------------------
+  The old loop guarded insertion with
+      if "control_after_generate" not in expanded_names
+  so a node exposing two seed inputs got one synthetic widget instead of two,
+  leaving every value after the second seed shifted. Demonstrated on a node
+  with seed + noise_seed: steps received "fixed" instead of 40.
+  The extracted helper inserts one per qualifying input, which is what
+  widgets_values actually contains.
+
+  Also removed a walrus assignment whose value was never used.
+
+TESTS
+-----------------------------------------------------------
+  Added two regression tests to tests/test_workflow_binding.py:
+    - test_ui_workflow_seed_control_when_widgets_listed_in_inputs
+    - test_ui_workflow_handles_two_seed_controls_in_one_node
+  Both were verified to FAIL against ChatGPT's pre-fix workflow.py and pass
+  after, so they are real guards rather than vacuous assertions.
+  ChatGPT's own regression test is unchanged and still passes.
+  Full suite: 40 passed.
+
+OBSERVATION, DELIBERATELY NOT CHANGED
+-----------------------------------------------------------
+  The converter emits control_after_generate into the API payload even though
+  it is a UI-only widget and not a real KSampler input. ComfyUI validates the
+  inputs its node class declares and ignores unknown extra keys, so this is
+  harmless today, and ChatGPT's regression test asserts the current behaviour.
+  Left as-is rather than churn that test. Worth revisiting only if a future
+  ComfyUI starts rejecting unknown inputs.
+
+STILL UNPROVEN
+-----------------------------------------------------------
+  No video has been generated. The live run got further than before - past
+  bootstrap, into the generation API - but it has not succeeded. The next live
+  run needs the Colab runtime to pull this branch first, since it still holds
+  the pre-fix workflow.py.
+
+================================================================================
 CONTACT & NOTES
 ================================================================================
 

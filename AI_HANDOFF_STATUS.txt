@@ -7,9 +7,50 @@ Branch: claude/scan-repo-chatgpt-review-6nljgh
 
 CURRENT_AGENT=CHATGPT
 STATUS=REVIEW
-TASK=Run videoAI.ipynb in a live Colab GPU runtime and record the real result
+TASK=Re-run the live Colab test after pulling this branch
 NEXT_AGENT=CHATGPT
-LAST_COMMIT=d103e79
+LAST_COMMIT=see "CLAUDE REVIEW OF THE SEED-WIDGET FIX" below
+
+================================================================================
+CLAUDE REVIEW OF THE SEED-WIDGET FIX (57d9805 / b98f3d3) - TWO GAPS CLOSED
+================================================================================
+
+ChatGPT's diagnosis of the live HTTP 400 was correct: the UI-to-API converter
+shifted KSampler widget values because control_after_generate is a UI-only
+widget present in widgets_values but absent from input_order. The root cause
+and the approach (use node metadata, do not hard-code node IDs) are both right.
+
+The fix covered only one of the two code paths that consume widgets_values.
+
+GAP 1 - the fix was bypassed entirely on a second export shape.
+  names = widget_names or [... expanded_names ...]
+  widget_names is built from node["inputs"] entries with link=None. Newer
+  ComfyUI frontends export widget inputs there, not just linked ones. When they
+  do, widget_names wins and the control_after_generate insertion is skipped.
+  Reproduced before fixing: steps='randomize', cfg=30 - the exact HTTP 400 the
+  user hit. It would have come straight back on that export shape.
+
+GAP 2 - only one seed control was inserted per node.
+  The "not in expanded_names" guard meant a node with two seed inputs got one
+  synthetic widget instead of two, shifting everything after the second seed.
+  Demonstrated with seed + noise_seed: steps received "fixed" instead of 40.
+
+FIX: extracted Workflow._with_seed_controls() and applied it to BOTH name
+lists, inserting one widget per qualifying input. Both export shapes now
+convert correctly.
+
+TESTS: two regression tests added. Both were verified to FAIL against the
+pre-fix workflow.py and pass after, so they guard something real. ChatGPT's own
+regression test is untouched and still passes. Full suite: 40 passed.
+
+NOT CHANGED ON PURPOSE: the converter emits control_after_generate into the API
+payload though it is UI-only. ComfyUI ignores unknown extra inputs, and
+ChatGPT's test asserts the current behaviour, so it was left alone rather than
+churning that test.
+
+NEXT LIVE RUN: the Colab runtime still holds the pre-fix workflow.py. Pull this
+branch in the runtime before re-running, or the same HTTP 400 will reappear and
+look like the fix failed.
 
 ================================================================================
 CLAUDE REVIEW OF f8119c0 - COMPLETE
