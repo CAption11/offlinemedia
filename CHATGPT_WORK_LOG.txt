@@ -96,20 +96,50 @@ Output validation                NEW CODE - PENDING LIVE RUN
 Colab video display              NEW CODE - PENDING LIVE RUN
 
 ================================================================================
+COLAB RE-RUN FIX - 2026-08-25
+================================================================================
+
+The user reran the bootstrap cell in an existing Colab runtime. ComfyUI was
+already healthy on 127.0.0.1:8188, so the old bootstrap raised:
+
+RuntimeError: Something is already listening on 127.0.0.1:8188.
+
+This was a bootstrap idempotency bug, not a ComfyUI generation failure.
+
+ChatGPT updated:
+portable/comfyui_bootstrap.py
+
+Commit:
+94f74d4a39d2b3fd0f6d67b025ef61692d6cefce
+
+New behaviour:
+- Check /system_stats before starting a server.
+- If a healthy ComfyUI already exists, reuse it and print an explicit message.
+- Start a new server only when the endpoint is not ready.
+- Return None when an existing server is reused because this process was not
+  created by the current bootstrap call.
+
+This makes repeated Colab cell execution safe without forcing a runtime
+restart or creating a second ComfyUI server.
+
+NEXT LIVE TEST:
+1. Pull the latest active branch in videoAI.ipynb.
+2. Rerun the bootstrap cell.
+3. It should report that ComfyUI is already running and reuse it.
+4. Continue to the generation/output-validation cells.
+
+================================================================================
 NEXT TASK FOR CLAUDE
 ================================================================================
 
-Review the output validation and video-display changes in commits
-bd2f5b6544ca051c4486bbd2bf6c2bb22fce3eaf and
-7a980ade824607fcb0e6aa1a1a423f8069c2d3a4.
+Review the output validation/video-display changes and the idempotent ComfyUI
+bootstrap fix. Check for regressions and compatibility with the existing
+engine. Do not claim the new validation/display path is live-tested until the
+user runs the updated notebook.
 
-Check for regressions and test compatibility with the existing generation
-engine. Do not claim the new validation/display path is live-tested; the user
-must run the updated notebook once.
-
-Also review the trigger lifecycle. The queued job was successfully consumed in
-the previous run, but the system still needs a clean, explicit completed/failed
-job state rather than leaving trigger.json ambiguous after generation.
+Also review trigger lifecycle: the queue currently supports queued/running
+claiming, but the system still needs an explicit completed/failed job state
+rather than leaving trigger.json ambiguous after generation.
 
 ================================================================================
 COMMUNICATION PROTOCOL
