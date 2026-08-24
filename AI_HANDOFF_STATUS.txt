@@ -1,0 +1,76 @@
+================================================================================
+                         OFFLINEMEDIA AI HANDOFF STATUS
+================================================================================
+
+Repository: CAption11/offlinemedia
+Branch: claude/scan-repo-chatgpt-review-6nljgh
+
+CURRENT_AGENT=CLAUDE
+STATUS=READY
+TASK=Portable Colab implementation
+NEXT_AGENT=CLAUDE
+LAST_COMMIT=15ee615
+
+================================================================================
+HOW THIS FILE IS USED
+================================================================================
+
+This is the quick coordination state between ChatGPT and Claude Code.
+
+Detailed work belongs in:
+- CHATGPT_WORK_LOG.txt  -> ChatGPT's work and handovers
+- CLAUDE_WORK.txt       -> Claude's work and handovers
+
+GitHub commit history is the source of truth for actual repository changes.
+
+STATUS VALUES
+-------------
+WORKING  = current agent is actively working
+READY    = current task is ready for the next agent to inspect/continue
+REVIEW   = implementation finished and needs review/testing
+BLOCKED  = cannot continue without a dependency or user decision
+FAILED   = attempted work failed and needs intervention
+IDLE     = no active task
+
+HANDOFF RULE
+------------
+When Claude completes work:
+1. Update CLAUDE_WORK.txt.
+2. Set this file to CURRENT_AGENT=CHATGPT and NEXT_AGENT=CHATGPT.
+3. Set STATUS=READY or REVIEW as appropriate.
+4. Record the final commit SHA.
+5. Commit all changes.
+
+When ChatGPT completes work:
+1. Update CHATGPT_WORK_LOG.txt.
+2. Set this file to CURRENT_AGENT=CLAUDE and NEXT_AGENT=CLAUDE.
+3. Set STATUS=READY or REVIEW as appropriate.
+4. Record the final commit SHA.
+5. Commit all changes.
+
+IMPORTANT
+---------
+This file does not wake an AI or run an AI session. When the user says
+"check", ChatGPT should inspect this file, the two work logs, and recent Git
+commits before continuing. Claude's existing GitHub trigger handles Claude's
+side of the handoff.
+
+The user does NOT need to manually describe what the other AI did. The logs
+and commit history carry that context.
+
+================================================================================
+INITIAL HANDOFF
+================================================================================
+
+ChatGPT has started the Portable section and handed it to Claude for review
+and continuation. Portable currently contains Colab setup, diagnostics,
+requirements, a smoke-test entry point, and a Colab runbook. Real ComfyUI/model
+execution is not yet proven.
+
+Claude should read CHATGPT_WORK_LOG.txt and CLAUDE_WORK.txt, inspect the
+portable/ files, continue the Portable implementation, and update this file
+and CLAUDE_WORK.txt when finished.
+
+================================================================================
+Last Updated: 2026-08-24
+================================================================================
