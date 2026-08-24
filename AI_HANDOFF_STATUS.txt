@@ -7,96 +7,77 @@ Branch: claude/scan-repo-chatgpt-review-6nljgh
 
 CURRENT_AGENT=CLAUDE
 STATUS=READY
-TASK=Review output validation and Colab video display changes
+TASK=Review idempotent Colab ComfyUI bootstrap fix and continue Portable validation
 NEXT_AGENT=CLAUDE
-LAST_COMMIT=7a980ade824607fcb0e6aa1a1a423f8069c2d3a4
+LAST_COMMIT=94f74d4
 
 ================================================================================
-CURRENT MILESTONE
+LATEST CHATGPT UPDATE - 2026-08-25
 ================================================================================
 
-A real text-to-video generation was successfully executed by the user in a
-live Colab GPU runtime. The earlier KSampler validation bug was fixed and the
-same queued cat request reached successful generation.
+The user reran the ComfyUI bootstrap cell in an existing Colab runtime.
+ComfyUI was already healthy on 127.0.0.1:8188, so the previous bootstrap
+incorrectly raised:
 
-The project has now proven the core path:
-GitHub trigger queue -> Colab GPU -> ComfyUI -> Wan 2.1 -> generated video.
+RuntimeError: Something is already listening on 127.0.0.1:8188.
 
-The remaining verification is output handling: the repository must validate
-the generated media file and the Colab notebook must display the generated
-video. Those changes are implemented but have not yet been live-tested after
-the latest commit.
+ChatGPT fixed portable/comfyui_bootstrap.py in commit 94f74d4.
 
-================================================================================
-LATEST CHATGPT CHANGES
-================================================================================
+New behaviour:
+- Check /system_stats before starting a server.
+- Reuse an already healthy ComfyUI instance.
+- Start a new process only when the endpoint is not ready.
+- Return None when an existing server is reused because this bootstrap call did
+  not create that process.
 
-1. scripts/test_generation.py
-Commit: bd2f5b6544ca051c4486bbd2bf6c2bb22fce3eaf
-
-Added output validation:
-- output file must exist
-- output file must be non-empty
-- ffprobe is used when available
-- a video stream is required
-- codec, resolution, frame count, FPS and duration are reported
-- validation failures return a non-zero exit code
-
-2. videoAI.ipynb
-Commit: 7a980ade824607fcb0e6aa1a1a423f8069c2d3a4
-
-The notebook now:
-- pulls the active branch
-- consumes a queued trigger
-- starts ComfyUI
-- captures generation stdout/stderr
-- extracts output paths
-- validates output files
-- runs ffprobe validation
-- displays the video in Colab
-- prints an explicit final success message after validation
-
-IMPORTANT: these newest validation/display changes still require one live
-Colab run. Do not claim they are live-verified until the user runs them.
+This is an idempotency fix for normal Colab cell re-runs. It does not claim a
+new generation succeeded.
 
 ================================================================================
-CLAUDE REVIEW TASK
+CURRENT EVIDENCE
 ================================================================================
 
-Claude should:
-1. Review the two latest commits above.
-2. Run/review relevant tests for regression risk.
-3. Inspect the output handling against the existing ComfyUI client/engine.
-4. Review trigger lifecycle handling and identify whether queued/running jobs
-   are explicitly marked completed or failed after generation.
-5. Update CLAUDE_WORK.txt with findings.
-6. Update this status file when the review is complete.
+Real text-to-video generation:
+PASS - previously verified live in Colab.
+
+KSampler workflow conversion:
+PASS - fixed and reviewed; Claude reported 40 tests passing.
+
+Output validation/display enhancement:
+PENDING LIVE VERIFICATION in the user's updated notebook.
+
+Current ComfyUI bootstrap rerun:
+FIXED in code; pending live verification of the new reuse path.
 
 ================================================================================
-PROJECT STATUS
+KNOWN TRIGGER LIMITATION
 ================================================================================
 
-MAINLOAD
-- Architecture planned.
-- Not the current active milestone.
+portable-trigger.yml is still on the feature branch and is not registered in
+the default branch's Actions UI. Manual trigger.json seeding remains the
+current workaround until the workflow is merged to the default branch.
 
-PORTABLE
-- GitHub trigger queue: PASS
-- Colab worker: PASS
-- NVIDIA/ComfyUI bootstrap: PASS
-- Wan 2.1 T2V generation: PASS in live run
-- Workflow conversion: PASS in live run
-- Output validation: implemented, live verification pending
-- Colab video display: implemented, live verification pending
-- Explicit trigger completion state: review pending
+image_to_video remains intentionally unproven and should not be presented as
+working until an image-input transport and required I2V assets are implemented.
 
 ================================================================================
-COMMUNICATION PROTOCOL
+NEXT EVIDENCE MILESTONE
 ================================================================================
 
-When the user says "check", ChatGPT inspects this file, CLAUDE_WORK.txt,
-CHATGPT_WORK_LOG.txt, recent commits and relevant source/test changes, then
-continues the next assigned task automatically.
+Run the updated videoAI.ipynb in the existing Colab runtime without restarting.
+The bootstrap should reuse the healthy ComfyUI server. Then the notebook should
+perform generation, validate the actual output with ffprobe, and display the
+video in Colab.
+
+Do not mark Portable output validation complete without an actual video file
+and successful media validation.
+
+================================================================================
+HANDOFF
+================================================================================
+
+Claude should review commit 94f74d4, run/review relevant tests, and update
+CLAUDE_WORK.txt and this status file when the review is complete.
 
 ================================================================================
 Last Updated: 2026-08-25 by ChatGPT
