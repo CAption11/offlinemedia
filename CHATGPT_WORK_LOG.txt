@@ -3,302 +3,201 @@
                               Updated: 2026-08-24
 ================================================================================
 
-PROJECT: OfflineMedia - Windows-first offline AI media generation workstation
+PROJECT: OfflineMedia
 REPOSITORY: CAption11/offlinemedia
 WORKING BRANCH: claude/scan-repo-chatgpt-review-6nljgh
 
 PURPOSE
 ================================================================================
-This file is the handover log from ChatGPT to Claude Code.
+Shared handover log between ChatGPT and Claude Code.
 
-Claude Code should read this file together with CLAUDE_WORK.txt before making
-major changes. ChatGPT will record architectural decisions, implementation
-plans, completed actions, and handover notes here. Claude should continue
-updating CLAUDE_WORK.txt as its own work log.
-
-The goal is to allow ChatGPT and Claude Code to work on the same repository
-without duplicating or silently overwriting each other's work.
+Claude reads this file + CLAUDE_WORK.txt before major changes.
+ChatGPT reads both before making changes.
+Claude records its work in CLAUDE_WORK.txt.
+ChatGPT records its work here.
+GitHub commit history is the final chronological source of truth.
 
 ================================================================================
-NEW PROJECT DIRECTION - TWO SECTIONS
+PROJECT STRUCTURE DECISION
 ================================================================================
 
-The project is now intentionally divided into TWO operational sections:
+OfflineMedia is divided into two operational sections:
 
 1. MAINLOAD
+   Downloadable/local Windows application.
+
 2. PORTABLE
+   Google Colab/GPU development and real-generation environment.
 
-These are not two unrelated applications. They are two deployment/runtime
-modes sharing the same core OfflineMedia architecture where practical.
-
---------------------------------------------------------------------------------
-1. MAINLOAD - LOCAL WINDOWS APPLICATION
---------------------------------------------------------------------------------
-
-Purpose:
-A downloadable application intended to run on a user's local PC.
-
-Target environment:
-- Windows PC
-- Local CPU/GPU/RAM
-- Local ComfyUI or another supported local generation engine
-- Local AI models
-- Local FFmpeg
-- Offline operation after installation and required model assets are available
-
-Mainload should eventually provide:
-- Windows desktop GUI using PySide6
-- Local model management
-- Local workflow management
-- Text -> Video
-- Image -> Video
-- Image Sequence -> Video
-- Local project/history management
-- Output preview
-- Diagnostics
-- Configuration
-- Packaging/installer
-
-Important:
-Mainload must NOT assume that every local PC has a powerful NVIDIA GPU.
-Hardware detection and capability reporting are required. The application
-should tell the user what is actually possible instead of pretending that an
-Intel integrated GPU is secretly an RTX 5090.
-
-Mainload is the eventual end-user product.
-
---------------------------------------------------------------------------------
-2. PORTABLE - GOOGLE COLAB / GPU DEVELOPMENT RUNTIME
---------------------------------------------------------------------------------
-
-Purpose:
-A portable development/testing environment intended primarily for Google
-Colab, where NVIDIA GPU resources can be used for real AI video generation.
-
-Target environment:
-- Google Colab
-- Linux runtime
-- NVIDIA GPU when allocated by Colab
-- ComfyUI
-- Downloaded local AI models inside the Colab runtime/Drive as appropriate
-- Repository cloned from GitHub
-
-Portable should provide:
-- One-command or minimal-step setup
-- GPU detection
-- ComfyUI setup/startup
-- Required custom-node setup when needed
-- Exact model/workflow installation
-- Diagnostics
-- Generation CLI/API
-- Real text-to-video smoke test
-- Real image-to-video smoke test
-- Output validation
-- MP4 preview/download from Colab
-- Easy reset/rebuild of the runtime
-
-Portable is NOT the final Windows application.
-It is the real-GPU laboratory for validating the generation pipeline before
-that pipeline is connected to Mainload.
+They share the generation core. Portable is the laboratory used to prove real
+AI generation before Mainload presents that generation as an end-user feature.
 
 ================================================================================
-SHARED ARCHITECTURE PRINCIPLE
+PORTABLE IMPLEMENTATION STARTED - 2026-08-24
 ================================================================================
 
-Mainload and Portable should share the same core generation concepts wherever
-possible.
+ChatGPT has now started implementing the Portable section on branch:
+claude/scan-repo-chatgpt-review-6nljgh
 
-Shared concepts:
-- GenerationRequest
-- GenerationType
-- Workflow loading/validation/binding
-- ComfyUI client
-- Engine abstraction
-- Model manifests
-- Model verification
-- Output/project metadata
-- Diagnostics logic where platform-independent
-- Tests
+Files added:
 
-Platform-specific concerns should remain separated.
+portable/README.md
+- Defines Portable's purpose and boundary.
+- Documents the Colab generation flow.
+- States that Portable is not the final Windows application.
 
-Example:
+portable/colab_setup.py
+- Portable-specific Colab runtime entry point.
+- Installs existing requirements-colab.txt.
+- Detects nvidia-smi.
+- Runs nvidia-smi when available.
+- Warns when no NVIDIA runtime is present.
+- Does NOT download model weights.
 
-                    OfflineMedia Core
-                           |
-             +-------------+-------------+
-             |                           |
-         MAINLOAD                     PORTABLE
-       Windows PC                    Google Colab
-             |                           |
-        PySide6 GUI                 CLI / Notebook
-             |                           |
-       Local ComfyUI               Colab ComfyUI
-             |                           |
-             +-----------+-------------+
-                         |
-                  Generation Engine
-                         |
-                    AI Workflows
-                         |
-                    AI Models
-                         |
-                       MP4
+portable/diagnostics.py
+- Portable runtime diagnostics.
+- Checks NVIDIA tooling, Git, FFmpeg, httpx, Pillow and psutil.
+- Displays NVIDIA information when available.
+- Returns failure for missing base Portable dependencies.
 
-Do NOT duplicate the generation engine merely because the deployment target
-is different.
+portable/smoke_test.py
+- Thin entry point to the existing shared scripts/test_generation.py.
+- Deliberately reuses the shared generation backend instead of duplicating it.
+
+portable/requirements.txt
+- Portable dependency entry point.
+- Reuses ../requirements-colab.txt.
+
+portable/colab_notebook.md
+- Colab runbook.
+- Clone -> setup -> diagnostics -> ComfyUI -> verified workflow/model -> real
+  text-to-video -> MP4 validation -> image-to-video.
 
 ================================================================================
-PROPOSED REPOSITORY ORGANIZATION
+CURRENT COMMITS FROM CHATGPT
 ================================================================================
 
-The existing repository must be inspected before moving files. Do not blindly
-restructure existing code.
+3084304
+Add ChatGPT work log and Mainload/Portable handoff
 
-A future organization may look conceptually like:
+f5b3f37
+Add Portable section documentation
 
-app/
-    core/                 # shared generation/config/validation/model logic
-    engines/              # ComfyUI and future engines
-    ui/                   # Mainload PySide6 GUI
-    video/                # shared/local media processing
-    storage/              # projects/history
+6899af4
+Add Portable Colab setup entry point
 
-mainload/
-    packaging/            # Windows packaging/installer resources
-    scripts/              # Windows-specific setup/diagnostics
+c0f9bc2
+Add Portable runtime diagnostics
 
-portable/
-    scripts/              # Colab setup, diagnostics, generation
-    notebooks/             # Colab notebooks
-    requirements.txt       # Portable-specific dependencies
+e02ff1c
+Add Portable generation smoke-test entry point
 
-workflows/
-    ...
+e179325
+Add Portable dependency entry point
 
-models/
-    manifests/
+2942503
+Add Portable Colab runbook
 
-projects/
-
-tests/
-
-This is a PLANNED organization, not an instruction to immediately move every
-existing file. First inspect the current repository and determine the smallest
-safe change.
+The commits above are sequential changes made by ChatGPT on the shared Claude
+branch.
 
 ================================================================================
-DEVELOPMENT PRIORITY HAS CHANGED
+EXISTING SHARED CODE USED
 ================================================================================
 
-The immediate goal is now to establish the Portable generation path first,
-because real GPU testing is needed before claiming the generation engine works.
+The repository already had:
 
-Priority order:
+requirements-colab.txt
+- Existing dependencies include httpx, psutil and Pillow.
 
-1. Preserve and understand existing Claude work.
-2. Define clean Mainload vs Portable boundaries.
-3. Build/repair Portable Colab setup.
-4. Get ComfyUI running in Colab.
-5. Verify exact lightweight video model + workflow.
-6. Run REAL text-to-video smoke test.
-7. Run REAL image-to-video smoke test.
-8. Validate generated MP4 and metadata.
-9. Stabilize shared generation core and tests.
-10. Connect the proven backend to Mainload PySide6 GUI.
-11. Add Mainload local hardware diagnostics.
-12. Add Mainload model/workflow management.
-13. Package Mainload for Windows.
-14. Add UI polish only after the actual generation pipeline works.
+scripts/colab_setup.py
+- Existing basic Colab setup script.
+- It deliberately avoided model downloads.
+
+scripts/test_generation.py
+- Existing real ComfyUI generation smoke-test CLI.
+- Checks ComfyUI availability.
+- Builds GenerationRequest.
+- Uses ComfyUIEngine.
+- Reports generation failure or output files.
+
+ChatGPT did NOT replace these shared components. Portable wraps/reuses them.
 
 ================================================================================
-MODEL / WORKFLOW RULE
+IMPORTANT: WHAT IS NOT COMPLETE YET
 ================================================================================
 
-Do not blindly download or hardcode model URLs.
+Portable is NOT yet a proven real video-generation environment.
 
-The selected model must be verified against the exact ComfyUI workflow and
-required custom nodes.
+The following still require real execution/verification:
 
-The first real model should remain lightweight enough to be practical in a
-Colab GPU environment. Wan 2.1 1.3B remains a candidate from the previous
-handoff, but it must be verified against current workflow/model requirements
-before implementation is finalized.
+1. ComfyUI installation/startup in Colab.
+2. Exact video workflow selection.
+3. Exact model selection and model files.
+4. Required custom nodes, if any.
+5. Real text-to-video generation.
+6. Real MP4 output validation.
+7. Real image-to-video generation.
 
-The first smoke test should be deliberately small, for example:
-- 320 x 240
-- 17 frames
-- 8 FPS
-- simple prompt
+No claim is being made that a video has been generated successfully yet.
 
-These are test parameters, not permanent product limits.
-
-================================================================================
-IMPORTANT ENGINEERING RULES
-================================================================================
-
-1. Do not fake functionality.
-2. Do not claim tests passed unless they actually ran.
-3. Do not claim a video was generated unless a real model generated it.
-4. Do not put multi-GB model weights in Git.
-5. Keep engine implementations behind an abstraction.
-6. Keep Mainload GUI independent from model-specific ComfyUI node details.
-7. Use deterministic model manifests and verification where possible.
-8. Add regression tests for significant bug fixes.
-9. Inspect the latest repository state before editing.
-10. Do not overwrite Claude's work blindly.
-11. Do not create duplicate implementations for the same function.
-12. If a feature cannot be tested in the current environment, create a real
-    test path for Windows or Colab rather than pretending it works.
-13. Keep Mainload and Portable responsibilities explicit.
-14. Portable must prove real generation before Mainload claims that generation
-    is operational.
+The first model candidate remains the lightweight Wan-based workflow described
+in the previous handoff, but it must be verified against the current ComfyUI
+workflow/model requirements before hardcoding URLs or manifests.
 
 ================================================================================
-CHATGPT ACTIONS - 2026-08-24
+NEXT CHATGPT TASKS
 ================================================================================
 
-- Read the project handoff supplied by the user.
-- Inspected the active Claude branch:
-  claude/scan-repo-chatgpt-review-6nljgh
-- Confirmed CLAUDE_WORK.txt exists on that branch.
-- Reviewed Claude's existing Phase 0 status and pending work.
-- Accepted the user's new two-section architecture:
-    MAINLOAD = downloadable/local Windows application
-    PORTABLE = Google Colab GPU development/testing environment
-- Decided that the Portable real-generation path should be prioritized before
-  substantial Mainload UI work.
-- Created this file so Claude Code has an explicit ChatGPT handoff channel.
-
-No source-code implementation has been changed by ChatGPT in this session yet.
-This commit only adds the coordination log.
+1. Verify the current repository workflow directory and whether any real
+   ComfyUI workflows already exist.
+2. Research/verify the current lightweight video workflow/model combination
+   suitable for Colab.
+3. Add only verified workflow/model manifests, not model weights.
+4. Make the Portable setup capable of installing the exact required ComfyUI
+   dependencies/custom nodes.
+5. Add a real Portable test path for text-to-video.
+6. Add image-to-video after text-to-video is proven.
+7. Add regression tests around Portable orchestration where practical.
 
 ================================================================================
 HANDOVER TO CLAUDE
 ================================================================================
 
-Claude should:
+Claude should now:
 
-1. Read this file.
-2. Read the latest CLAUDE_WORK.txt.
-3. Inspect the current repository tree on this branch.
-4. Check whether another Claude commit has appeared since the previous handoff.
-5. Do NOT undo existing Phase 0 work.
-6. Propose/implement the smallest safe changes needed to establish the new
-   Mainload/Portable separation.
-7. Prioritize a working Portable Colab path.
-8. Update CLAUDE_WORK.txt with every significant action, test result, and
-   architectural decision.
-9. Leave this CHATGPT_WORK_LOG.txt intact unless coordination requirements
-   change.
+1. Read this updated log.
+2. Read CLAUDE_WORK.txt.
+3. Inspect the new portable/ files and current repository state.
+4. Do not remove the Portable wrappers without a concrete reason.
+5. Continue documenting Claude's own work in CLAUDE_WORK.txt.
+6. If Claude changes the Portable architecture, record the reason in
+   CLAUDE_WORK.txt so ChatGPT can understand it on the next pass.
+7. Do not claim real generation until Colab + ComfyUI + model have actually
+   generated and validated an MP4.
 
-The shared objective remains:
+================================================================================
+COMMUNICATION PROTOCOL
+================================================================================
 
-REAL COLAB TEXT-TO-VIDEO GENERATION
-        -> REAL IMAGE-TO-VIDEO
-        -> SHARED BACKEND
-        -> MAINLOAD WINDOWS GUI
-        -> WINDOWS PACKAGING
+ChatGPT -> Claude:
+- Update CHATGPT_WORK_LOG.txt.
+- Commit changes to the shared branch.
+- State exact files, decisions, tests and remaining work.
+
+Claude -> ChatGPT:
+- Update CLAUDE_WORK.txt.
+- Commit changes to the shared branch.
+- State exact files, decisions, tests and remaining work.
+
+Before either agent edits:
+- Inspect current branch.
+- Read both logs.
+- Inspect recent commits.
+- Preserve existing work.
+
+Do not use the logs as a substitute for inspecting source code.
+The logs are coordination aids; the repository is the implementation truth.
 
 ================================================================================
 END OF CHATGPT WORK LOG
