@@ -520,6 +520,103 @@ NEXT HANDOFF:
   next development phase (Mainload integration)
 
 ================================================================================
+SESSION 6: CLAUDE REVIEW OF videoAI.ipynb TRIGGER INTEGRATION (2026-08-24)
+================================================================================
+
+Reviewed ChatGPT commit f8119c0 (videoAI.ipynb trigger integration) against the
+six review questions in AI_HANDOFF_STATUS.txt. Two blocking defects were found
+and fixed. Both were verified by reproduction, not by reading alone.
+
+DEFECT 1 - videoAI.ipynb could never generate a video (BLOCKING, FIXED)
+-----------------------------------------------------------
+  The notebook ran scripts/test_generation.py, which requires a ComfyUI server
+  on 127.0.0.1:8188, but the notebook never installed ComfyUI, never downloaded
+  model weights and never started the server. test_generation.py returns exit
+  code 2 when ComfyUI is unreachable, so the final cell would have raised
+  RuntimeError on every run.
+
+  Root cause: the ComfyUI bootstrap existed only as inline cells inside
+  OfflineMedia_Portable_Colab.ipynb. It was not reusable, so videoAI.ipynb had
+  no way to share it. portable/colab_setup.py explicitly lists "Install/start
+  ComfyUI" as a next step that nothing implemented.
+
+  FIX: Added portable/comfyui_bootstrap.py as shared code (install ComfyUI,
+  download the official Wan 2.1 T2V assets, sync official workflows, start the
+  server, wait for /system_stats). videoAI.ipynb now calls bootstrap() before
+  generating. Startup failures surface the tail of the ComfyUI log instead of a
+  bare timeout.
+
+DEFECT 2 - Queue inspection crashed on an empty queue (FIXED)
+-----------------------------------------------------------
+  portable/trigger.json has never been created (the trigger workflow has not
+  run), so the GitHub contents API returns 404. get_trigger() did not handle
+  404, so notebook cell 5 raised HTTPError. Reproduced against the live API:
+    RAISED: HTTPError HTTP Error 404: Not Found
+
+  FIX: get_trigger() now raises TriggerNotFound for a missing queue file and
+  still propagates real errors (500 etc). Added read_trigger_or_none() for the
+  inspection step. wait_for_trigger() treats an absent queue as "no job yet"
+  and waits silently instead of printing errors on every poll.
+
+DUPLICATE PROCESSING - ChatGPT review question 4 (CONFIRMED, FIXED)
+-----------------------------------------------------------
+  Confirmed the risk was real. wait_for_trigger() returned as soon as it saw
+  status=="queued" and nothing ever changed that status, so:
+    - two Colab runtimes polling the same queue both run the same job
+    - re-running the notebook reprocesses the last request
+  The listener docstring said "Read and optionally claim" but no claim existed,
+  even though get_trigger already returned the blob SHA needed for one.
+
+  FIX: Added claim_trigger(), which PUTs status=running conditional on that
+  blob SHA. GitHub rejects a stale SHA, so exactly one worker wins the claim;
+  the loser keeps polling. wait_for_trigger(claim=True) uses it, and
+  skip_job_ids guards against a re-run picking up an already-handled job.
+  Claiming requires a token, so the call fails fast when one is missing rather
+  than silently not claiming.
+
+REVIEW QUESTION 3 - Trigger parameters vs GenerationRequest (VERIFIED OK)
+-----------------------------------------------------------
+  The workflow's mode choices (text_to_video, image_to_video) match
+  GenerationType values exactly. width/height/frames/fps map onto
+  GenerationRequest fields and the workflow defaults (320x240) satisfy
+  validate_generation's divisible-by-8 rule.
+
+  One design gap, NOT fixed (needs a product decision):
+  the workflow accepts mode=image_to_video but has no way to supply an input
+  image. validate_generation does not reject an empty input_images list, so
+  such a job fails later inside the workflow rather than up front. Either add
+  an image parameter to the trigger or restrict the workflow to text_to_video.
+
+REVIEW QUESTION 6 - Should videoAI.ipynb move to portable/? (RECOMMEND: NO)
+-----------------------------------------------------------
+  Leave it at the repository root. Colab's "Save a copy in GitHub" writes back
+  to the path it was opened from, and the notebook's own Colab badge points at
+  the root path. Moving it would break the user's save round-trip for a purely
+  cosmetic gain. Aesthetics do not justify that churn.
+
+NOTE ON THE HAND-WRITTEN WAN TEMPLATES
+-----------------------------------------------------------
+  ComfyUIEngine.workflow_for() resolves text_to_video.json / image_to_video.json.
+  The Session 3 templates are named text_to_video_wan_2_1.json and
+  image_to_video_wan_2_1.json, so the engine never loads them. They are
+  reference-only and are superseded by workflows/official/, which
+  sync_official_workflows.py fetches at runtime. Left in place to avoid churn,
+  but they should not be treated as a generation path.
+
+TESTS
+-----------------------------------------------------------
+  tests/test_trigger_listener.py extended from 9 to 19 tests covering the
+  empty-queue path, claim success, claim conflict, losing a claim, skip_job_ids
+  and the claim-requires-token guard.
+  Full suite: 37 passed.
+
+STILL NOT PROVEN
+-----------------------------------------------------------
+  No video has been generated. The notebook can now reach a running ComfyUI,
+  which it could not before, but the first real GPU run is still the outstanding
+  evidence milestone. Configuration is not generation.
+
+================================================================================
 CONTACT & NOTES
 ================================================================================
 

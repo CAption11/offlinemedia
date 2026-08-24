@@ -1,13 +1,37 @@
 """Tests for the Portable Colab trigger listener."""
 from __future__ import annotations
 
+import base64
 import json
-import time
+import urllib.error
 from unittest import mock
 
 import pytest
 
-from portable.trigger_listener import get_trigger, wait_for_trigger
+from portable.trigger_listener import (
+    TriggerClaimConflict,
+    TriggerNotFound,
+    claim_trigger,
+    get_trigger,
+    read_trigger_or_none,
+    wait_for_trigger,
+)
+
+
+def _contents_response(payload: dict[str, object], sha: str = "abc123") -> mock.MagicMock:
+    """Build a mock urlopen context manager for a GitHub contents response."""
+    encoded = base64.b64encode(json.dumps(payload).encode()).decode()
+    body = json.dumps({"content": encoded, "sha": sha}).encode()
+    response = mock.MagicMock()
+    response.read.return_value = body
+    response.headers = {}
+    response.__enter__.return_value = response
+    response.__exit__.return_value = False
+    return response
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("url", code, "error", {}, None)
 
 
 class TestTriggerJsonStructure:
@@ -195,3 +219,146 @@ class TestWaitForTrigger:
         result = wait_for_trigger(poll_seconds=1)
         assert result["status"] == "queued"
         assert mock_urlopen.call_count == 3
+
+
+class TestEmptyQueue:
+    """An empty queue is a normal state, not a failure."""
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    def test_get_trigger_raises_trigger_not_found_on_404(
+        self, mock_urlopen: mock.MagicMock
+    ) -> None:
+        """A queue file that was never created raises TriggerNotFound, not HTTPError."""
+        mock_urlopen.side_effect = _http_error(404)
+
+        with pytest.raises(TriggerNotFound):
+            get_trigger()
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    def test_get_trigger_propagates_other_http_errors(
+        self, mock_urlopen: mock.MagicMock
+    ) -> None:
+        """Server errors must not be disguised as an empty queue."""
+        mock_urlopen.side_effect = _http_error(500)
+
+        with pytest.raises(urllib.error.HTTPError):
+            get_trigger()
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    def test_read_trigger_or_none_returns_none_when_absent(
+        self, mock_urlopen: mock.MagicMock
+    ) -> None:
+        """read_trigger_or_none reports an empty queue instead of raising."""
+        mock_urlopen.side_effect = _http_error(404)
+
+        trigger, sha = read_trigger_or_none()
+        assert trigger is None
+        assert sha == ""
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    @mock.patch("portable.trigger_listener.time.sleep")
+    def test_wait_for_trigger_keeps_polling_an_empty_queue(
+        self, mock_sleep: mock.MagicMock, mock_urlopen: mock.MagicMock
+    ) -> None:
+        """Polling before the first job exists must wait, not crash."""
+        mock_urlopen.side_effect = [
+            _http_error(404),
+            _contents_response({"status": "queued", "job_id": "123"}),
+        ]
+
+        result = wait_for_trigger(poll_seconds=1)
+        assert result["job_id"] == "123"
+        assert mock_urlopen.call_count == 2
+
+
+class TestClaimTrigger:
+    """Claiming prevents two workers from running the same job."""
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    def test_claim_marks_request_running_conditional_on_sha(
+        self, mock_urlopen: mock.MagicMock
+    ) -> None:
+        """The claim PUT sends the blob sha so a stale write is rejected."""
+        response = mock.MagicMock()
+        response.read.return_value = b"{}"
+        response.headers = {}
+        response.__enter__.return_value = response
+        response.__exit__.return_value = False
+        mock_urlopen.return_value = response
+
+        trigger = {"job_id": "123", "status": "queued", "prompt": "a ball"}
+        claimed = claim_trigger(trigger, "blob-sha", token="t")
+
+        assert claimed["status"] == "running"
+        assert claimed["prompt"] == "a ball"
+        request_obj = mock_urlopen.call_args[0][0]
+        assert request_obj.get_method() == "PUT"
+        body = json.loads(request_obj.data.decode())
+        assert body["sha"] == "blob-sha"
+        # The queued request must survive the claim intact.
+        written = json.loads(base64.b64decode(body["content"]).decode())
+        assert written == {"job_id": "123", "status": "running", "prompt": "a ball"}
+
+    @mock.patch("portable.trigger_listener.urllib.request.urlopen")
+    def test_claim_conflict_when_another_worker_won(
+        self, mock_urlopen: mock.MagicMock
+    ) -> None:
+        """A rejected conditional write means someone else claimed the job."""
+        mock_urlopen.side_effect = _http_error(409)
+
+        with pytest.raises(TriggerClaimConflict):
+            claim_trigger({"job_id": "1"}, "stale-sha", token="t")
+
+    def test_claim_requires_token(self) -> None:
+        """wait_for_trigger refuses to promise a claim it cannot perform."""
+        with pytest.raises(ValueError):
+            wait_for_trigger(claim=True, token=None)
+
+    @mock.patch("portable.trigger_listener.claim_trigger")
+    @mock.patch("portable.trigger_listener.get_trigger")
+    def test_wait_for_trigger_returns_claimed_request(
+        self, mock_get_trigger: mock.MagicMock, mock_claim: mock.MagicMock
+    ) -> None:
+        """With claim=True the returned request is the claimed one."""
+        mock_get_trigger.return_value = ({"status": "queued", "job_id": "123"}, "sha")
+        mock_claim.return_value = {"status": "running", "job_id": "123"}
+
+        result = wait_for_trigger(token="t", claim=True, poll_seconds=0)
+        assert result["status"] == "running"
+        mock_claim.assert_called_once()
+
+    @mock.patch("portable.trigger_listener.time.sleep")
+    @mock.patch("portable.trigger_listener.claim_trigger")
+    @mock.patch("portable.trigger_listener.get_trigger")
+    def test_losing_a_claim_keeps_polling(
+        self,
+        mock_get_trigger: mock.MagicMock,
+        mock_claim: mock.MagicMock,
+        mock_sleep: mock.MagicMock,
+    ) -> None:
+        """Losing the race must not return the job to this worker."""
+        mock_get_trigger.side_effect = [
+            ({"status": "queued", "job_id": "123"}, "sha"),
+            ({"status": "queued", "job_id": "456"}, "sha2"),
+        ]
+        mock_claim.side_effect = [
+            TriggerClaimConflict("lost"),
+            {"status": "running", "job_id": "456"},
+        ]
+
+        result = wait_for_trigger(token="t", claim=True, poll_seconds=1)
+        assert result["job_id"] == "456"
+
+    @mock.patch("portable.trigger_listener.time.sleep")
+    @mock.patch("portable.trigger_listener.get_trigger")
+    def test_skip_job_ids_prevents_reprocessing(
+        self, mock_get_trigger: mock.MagicMock, mock_sleep: mock.MagicMock
+    ) -> None:
+        """A re-run must not pick up the job this runtime already handled."""
+        mock_get_trigger.side_effect = [
+            ({"status": "queued", "job_id": "done"}, "sha"),
+            ({"status": "queued", "job_id": "fresh"}, "sha2"),
+        ]
+
+        result = wait_for_trigger(poll_seconds=1, skip_job_ids={"done"})
+        assert result["job_id"] == "fresh"
