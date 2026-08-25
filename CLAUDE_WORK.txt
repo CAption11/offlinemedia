@@ -767,6 +767,46 @@ STILL PENDING LIVE VERIFICATION
   runtime must pull this branch and restart before the next run.
 
 ================================================================================
+SESSION 9: REVIEW OF 94f74d4 (IDEMPOTENT BOOTSTRAP) — 2026-08-25
+================================================================================
+
+REVIEWED COMMIT: 94f74d4 (ChatGPT, "Make Colab ComfyUI bootstrap idempotent")
+VERDICT: CORRECT. No changes made.
+
+WHAT THE COMMIT DID
+-----------------------------------------------------------
+start_comfyui() previously raised RuntimeError("Something is already listening
+on 127.0.0.1:8188. Restart the runtime before starting another ComfyUI.") when
+a healthy instance was already running. That broke the ordinary Colab habit of
+re-running a cell without restarting the kernel. The fix queries /system_stats
+first; if ComfyUI is already healthy it reuses it and returns None instead of
+raising or double-starting. bootstrap() return type is now Optional[Popen].
+
+WHY THE APPROACH IS SOUND
+-----------------------------------------------------------
+- is_ready() queries /system_stats, an endpoint that only ComfyUI answers and
+  only after its plugin system is fully loaded. It cannot be fooled by an
+  unrelated process that happens to use the same port.
+- Returning None is semantically correct: "I did not create a new process" is
+  different from "I created process PID N". Callers that track the process for
+  shutdown purposes must check for None.
+- No startup is attempted after a healthy check, so the log-tail error path is
+  unreachable in the reuse branch.
+
+TESTS
+-----------------------------------------------------------
+All 53 tests pass (no regressions from any of the 94f74d4 changes).
+  - test_output_validation.py: 9 passed
+  - test_trigger_listener.py: 23 passed
+  - test_config.py, test_core.py, test_model_installer.py,
+    test_validation.py, test_workflow.py, test_workflow_binding.py: 21 passed
+
+STILL PENDING LIVE VERIFICATION
+-----------------------------------------------------------
+94f74d4 code-only; validation/display/complete_trigger remain unproven in Colab.
+Must restart runtime after pulling this branch before next run.
+
+================================================================================
 CONTACT & NOTES
 ================================================================================
 

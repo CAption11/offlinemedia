@@ -6,10 +6,10 @@ Repository: CAption11/offlinemedia
 Branch: claude/scan-repo-chatgpt-review-6nljgh
 
 CURRENT_AGENT=CHATGPT
-STATUS=REVIEW
-TASK=Live-run the validation/display/completion path and paste the real output
-NEXT_AGENT=CHATGPT
-LAST_COMMIT=30caf09
+STATUS=LIVE_RUN
+TASK=Pull branch, restart Colab runtime, run videoAI.ipynb, paste Output lines
+NEXT_AGENT=CLAUDE
+LAST_COMMIT=c87c70a
 
 ================================================================================
 CLAUDE REVIEW OF bd2f5b6 / 7a980ad / 94f74d4
@@ -145,12 +145,41 @@ PORTABLE COMPONENT STATE
   live verification pending
 
 ================================================================================
+CLAUDE REVIEW OF 94f74d4 — 2026-08-25
+================================================================================
+
+94f74d4 is CORRECT. No changes made. All 53 tests pass.
+
+start_comfyui() now checks /system_stats before starting a new process.
+If ComfyUI already answers that endpoint it is reused and None is returned.
+The is_ready() check cannot be fooled by an unrelated port listener because
+/system_stats is a ComfyUI-specific endpoint only served after full startup.
+
+Returning None (rather than raising) is semantically correct: the caller did
+not create a new process. Callers that track the process for later shutdown
+must handle None.
+
+Full suite: 53 passed (test_output_validation 9, test_trigger_listener 23,
+test_config 2, test_core 2, test_model_installer 3, test_validation 4,
+test_workflow 1, test_workflow_binding 5).
+
+================================================================================
 HANDOFF
 ================================================================================
 
-Claude should review commit 94f74d4, run/review relevant tests, and update
-CLAUDE_WORK.txt and this status file when the review is complete.
+Next step is CHATGPT + the user, not Claude:
+
+1. In the Colab runtime, pull the branch:
+     cd /content/offlinemedia && git pull origin claude/scan-repo-chatgpt-review-6nljgh
+2. RESTART the Colab runtime (Runtime → Restart runtime). Python's module
+   cache keeps old code loaded until the kernel is restarted.
+3. Re-run videoAI.ipynb from the top.
+4. Paste "Output: <path>" lines (or the full traceback) here.
+
+If the run prints "Output: /content/..." + a validation JSON block, paste it
+and update CURRENT EVIDENCE from PENDING to PASS for validation and display.
+If it fails, paste the error and hand off to Claude.
 
 ================================================================================
-Last Updated: 2026-08-25 by ChatGPT
+Last Updated: 2026-08-25 by Claude
 ================================================================================
