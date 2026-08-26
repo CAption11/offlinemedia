@@ -114,14 +114,71 @@ class GenerationState:
 
 
 # ---------------------------------------------------------------------------
-# Wan2GP HTTP API client
+# Wan2GP API client (gradio_client — works with Gradio 4.x)
 # ---------------------------------------------------------------------------
 
 class Wan2GPClient:
-    """Thin wrapper around the Wan2GP Gradio HTTP predict API."""
+    """Call Wan2GP via gradio_client, which works with Gradio 3.x and 4.x.
+
+    Wan2GP's Gradio endpoint names vary by version, so this client discovers
+    the available APIs on first use and picks the best match automatically.
+    Call view_api() to print what Wan2GP exposes in this installation.
+    """
+
+    # Candidate API names Wan2GP uses for its main generation function.
+    # Tried in order; first one that exists wins.
+    _CANDIDATE_API_NAMES = [
+        "/generate",
+        "/run",
+        "/predict",
+        "/generate_video",
+        "/text_to_video",
+    ]
 
     def __init__(self, host: str = "127.0.0.1", port: int = 7860):
         self.base_url = f"http://{host}:{port}"
+        self._client = None
+        self._api_name: str | None = None
+
+    def _get_client(self):
+        if self._client is None:
+            try:
+                from gradio_client import Client  # type: ignore[import-untyped]
+            except ImportError:
+                import subprocess, sys
+                subprocess.run(
+                    [sys.executable, "-m", "pip", "install", "-q", "gradio_client"],
+                    check=True,
+                )
+                from gradio_client import Client  # type: ignore[import-untyped]
+            self._client = Client(self.base_url, verbose=False)
+        return self._client
+
+    def view_api(self) -> None:
+        """Print all API endpoints Wan2GP exposes in this installation."""
+        self._get_client().view_api()
+
+    def _discover_api_name(self) -> str:
+        """Find which generation API name this Wan2GP version uses."""
+        if self._api_name is not None:
+            return self._api_name
+        client = self._get_client()
+        # gradio_client stores endpoint info in client.endpoints
+        try:
+            available = {ep.api_name for ep in client.endpoints if hasattr(ep, "api_name")}
+        except Exception:
+            available = set()
+
+        for name in self._CANDIDATE_API_NAMES:
+            if name in available:
+                self._api_name = name
+                print(f"Wan2GP API: using endpoint '{name}'")
+                return name
+
+        # Fallback: use fn_index 0 (works with older Gradio 3.x builds)
+        print("Warning: could not discover API name; falling back to fn_index=0")
+        self._api_name = 0  # type: ignore[assignment]
+        return self._api_name  # type: ignore[return-value]
 
     def is_available(self, timeout: float = 5.0) -> bool:
         import urllib.request
@@ -131,41 +188,39 @@ class Wan2GPClient:
         except Exception:
             return False
 
-    def generate_text_to_video(self, scene: Scene, output_path: Path) -> Path:
-        """Call Wan2GP API for text-to-video and save the result.
+    def _call(self, *args) -> Path:
+        """Invoke the generation endpoint and return the output video path."""
+        import shutil as _shutil
+        client = self._get_client()
+        api_name = self._discover_api_name()
+        if isinstance(api_name, int):
+            result = client.predict(*args, fn_index=api_name)
+        else:
+            result = client.predict(*args, api_name=api_name)
+        # gradio_client returns a file path string or a dict with "name"
+        if isinstance(result, dict):
+            clip_path = Path(result["name"])
+        elif isinstance(result, (list, tuple)):
+            first = result[0]
+            clip_path = Path(first["name"] if isinstance(first, dict) else first)
+        else:
+            clip_path = Path(str(result))
+        return clip_path
 
-        NOTE: Wan2GP's Gradio API endpoint varies by version. This uses the
-        /run/predict endpoint with the standard Gradio JSON payload. If the
-        endpoint returns 404, the server may need --api flag or a newer version.
-        """
-        import json
-        import urllib.request
-        frames = max(1, int(scene.duration_seconds * scene.fps))
-        payload = json.dumps({
-            "fn_index": 0,
-            "data": [
-                scene.prompt,
-                scene.negative_prompt,
-                scene.width,
-                scene.height,
-                frames,
-                scene.fps,
-                scene.seed,
-                "text_to_video",
-                None,   # input_image (None for T2V)
-            ],
-        }).encode()
-        req = urllib.request.Request(
-            f"{self.base_url}/run/predict",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=600) as resp:
-            result = json.loads(resp.read())
-        # Gradio returns {"data": [{"name": "/tmp/gradio/...", ...}]}
-        clip_path = Path(result["data"][0]["name"])
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+    def generate_text_to_video(self, scene: Scene, output_path: Path) -> Path:
+        """Generate a clip from a text prompt and save it to output_path."""
         import shutil
+        frames = max(1, int(scene.duration_seconds * scene.fps))
+        clip_path = self._call(
+            scene.prompt,
+            scene.negative_prompt,
+            scene.width,
+            scene.height,
+            frames,
+            scene.fps,
+            scene.seed,
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(clip_path), str(output_path))
         return output_path
 
@@ -175,34 +230,20 @@ class Wan2GPClient:
         start_image: Path,
         output_path: Path,
     ) -> Path:
-        """Call Wan2GP API for image-to-video (continuity mode)."""
-        import json
-        import urllib.request
-        frames = max(1, int(scene.duration_seconds * scene.fps))
-        payload = json.dumps({
-            "fn_index": 0,
-            "data": [
-                scene.prompt,
-                scene.negative_prompt,
-                scene.width,
-                scene.height,
-                frames,
-                scene.fps,
-                scene.seed,
-                "image_to_video",
-                str(start_image),
-            ],
-        }).encode()
-        req = urllib.request.Request(
-            f"{self.base_url}/run/predict",
-            data=payload,
-            headers={"Content-Type": "application/json"},
-        )
-        with urllib.request.urlopen(req, timeout=600) as resp:
-            result = json.loads(resp.read())
-        clip_path = Path(result["data"][0]["name"])
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        """Generate a clip from a start image for visual continuity."""
         import shutil
+        frames = max(1, int(scene.duration_seconds * scene.fps))
+        clip_path = self._call(
+            scene.prompt,
+            scene.negative_prompt,
+            scene.width,
+            scene.height,
+            frames,
+            scene.fps,
+            scene.seed,
+            str(start_image),
+        )
+        output_path.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(str(clip_path), str(output_path))
         return output_path
 
