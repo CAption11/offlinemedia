@@ -1,0 +1,89 @@
+name: Portable Colab Trigger
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: 'Generation mode'
+        required: true
+        default: 'text_to_video'
+        type: choice
+        options:
+          - text_to_video
+          - image_to_video
+      prompt:
+        description: 'Prompt for the Colab job'
+        required: true
+        default: 'A small red ball rolling across a wooden table, natural lighting'
+        type: string
+      width:
+        description: 'Output width'
+        required: true
+        default: '320'
+        type: string
+      height:
+        description: 'Output height'
+        required: true
+        default: '240'
+        type: string
+      frames:
+        description: 'Frame count'
+        required: true
+        default: '17'
+        type: string
+      fps:
+        description: 'Frames per second'
+        required: true
+        default: '8'
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  queue-colab-job:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout active branch
+        uses: actions/checkout@v4
+        with:
+          ref: claude/scan-repo-chatgpt-review-6nljgh
+          fetch-depth: 0
+
+      - name: Create trigger request
+        env:
+          MODE: ${{ inputs.mode }}
+          PROMPT: ${{ inputs.prompt }}
+          WIDTH: ${{ inputs.width }}
+          HEIGHT: ${{ inputs.height }}
+          FRAMES: ${{ inputs.frames }}
+          FPS: ${{ inputs.fps }}
+        run: |
+          python - <<'PY'
+          import json, os, uuid
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          request = {
+              "job_id": str(uuid.uuid4()),
+              "status": "queued",
+              "mode": os.environ["MODE"],
+              "prompt": os.environ["PROMPT"],
+              "width": int(os.environ["WIDTH"]),
+              "height": int(os.environ["HEIGHT"]),
+              "frames": int(os.environ["FRAMES"]),
+              "fps": int(os.environ["FPS"]),
+              "created_at": datetime.now(timezone.utc).isoformat(),
+              "source": "github_actions",
+          }
+          Path("portable/trigger.json").write_text(json.dumps(request, indent=2) + "\n", encoding="utf-8")
+          print(json.dumps(request, indent=2))
+          PY
+
+      - name: Commit trigger request
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add portable/trigger.json
+          git commit -m "Queue Portable Colab job" || exit 0
+          git push origin HEAD:claude/scan-repo-chatgpt-review-6nljgh

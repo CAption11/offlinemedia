@@ -1,0 +1,158 @@
+================================================================================
+                         OFFLINEMEDIA - CHATGPT WORK LOG
+                              Updated: 2026-08-25
+================================================================================
+
+PROJECT: OfflineMedia
+REPOSITORY: CAption11/offlinemedia
+WORKING BRANCH: claude/scan-repo-chatgpt-review-6nljgh
+
+PURPOSE
+================================================================================
+Shared handover log between ChatGPT and Claude Code.
+Claude reads this file + CLAUDE_WORK.txt before major changes.
+ChatGPT reads both before making changes.
+GitHub commit history is the source of truth for actual repository changes.
+
+================================================================================
+PROJECT STRUCTURE
+================================================================================
+
+1. MAINLOAD = downloadable/local Windows application.
+2. PORTABLE = Google Colab/GPU development and real-generation environment.
+
+They share the generation core. Portable proves the real AI pipeline before
+Mainload exposes it as an end-user feature.
+
+================================================================================
+LIVE COLAB GENERATION - SUCCESS
+================================================================================
+
+The user ran videoAI.ipynb on a live Colab GPU runtime using the queued sample
+request:
+
+mode: text_to_video
+prompt: A cat waving its tail, sitting on a wooden floor, natural lighting
+320x240, 17 frames, 8 fps
+
+The run successfully reached ComfyUI and returned "Generation completed
+successfully." This proved that the earlier KSampler workflow conversion fix
+worked in the live runtime.
+
+================================================================================
+OUTPUT VALIDATION WORK
+================================================================================
+
+ChatGPT then updated scripts/test_generation.py to validate actual generated
+outputs instead of treating a successful ComfyUI response as sufficient.
+
+Commit:
+bd2f5b6544ca051c4486bbd2bf6c2bb22fce3eaf
+
+The smoke test now:
+- requires an output file
+- rejects zero-byte output
+- uses ffprobe when available
+- requires a video stream
+- reports codec, width, height, frame count, FPS and duration
+- prints each output path
+- exits non-zero when validation fails
+
+================================================================================
+COLAB NOTEBOOK OUTPUT/DISPLAY WORK
+================================================================================
+
+Updated videoAI.ipynb so the live Colab worker now:
+- pulls the active branch at startup
+- consumes the trigger
+- starts ComfyUI
+- captures generation stdout/stderr
+- extracts generated output paths
+- verifies output files exist and are non-empty
+- runs ffprobe validation
+- displays generated video directly in Colab with IPython.display.Video
+- prints "REAL VIDEO GENERATION AND OUTPUT VALIDATION PASSED" after validation
+
+Commit:
+7a980ade824607fcb0e6aa1a1a423f8069c2d3a4
+
+IMPORTANT: The user has not yet rerun this newly enhanced notebook cell after
+this commit. The earlier live run proved generation succeeded, but the new
+output-validation/display path still needs one live verification.
+
+================================================================================
+CURRENT LIVE PIPELINE STATE
+================================================================================
+
+GitHub branch                    PASS
+Colab GPU                       PASS
+ComfyUI bootstrap                PASS
+Wan 2.1 assets                   PASS
+Trigger queue                    PASS
+Trigger -> generation engine    PASS
+KSampler conversion fix          PASS in live run
+Real video generation            PASS in live run
+Output validation                NEW CODE - PENDING LIVE RUN
+Colab video display              NEW CODE - PENDING LIVE RUN
+
+================================================================================
+COLAB RE-RUN FIX - 2026-08-25
+================================================================================
+
+The user reran the bootstrap cell in an existing Colab runtime. ComfyUI was
+already healthy on 127.0.0.1:8188, so the old bootstrap raised:
+
+RuntimeError: Something is already listening on 127.0.0.1:8188.
+
+This was a bootstrap idempotency bug, not a ComfyUI generation failure.
+
+ChatGPT updated:
+portable/comfyui_bootstrap.py
+
+Commit:
+94f74d4a39d2b3fd0f6d67b025ef61692d6cefce
+
+New behaviour:
+- Check /system_stats before starting a server.
+- If a healthy ComfyUI already exists, reuse it and print an explicit message.
+- Start a new server only when the endpoint is not ready.
+- Return None when an existing server is reused because this process was not
+  created by the current bootstrap call.
+
+This makes repeated Colab cell execution safe without forcing a runtime
+restart or creating a second ComfyUI server.
+
+NEXT LIVE TEST:
+1. Pull the latest active branch in videoAI.ipynb.
+2. Rerun the bootstrap cell.
+3. It should report that ComfyUI is already running and reuse it.
+4. Continue to the generation/output-validation cells.
+
+================================================================================
+NEXT TASK FOR CLAUDE
+================================================================================
+
+Review the output validation/video-display changes and the idempotent ComfyUI
+bootstrap fix. Check for regressions and compatibility with the existing
+engine. Do not claim the new validation/display path is live-tested until the
+user runs the updated notebook.
+
+Also review trigger lifecycle: the queue currently supports queued/running
+claiming, but the system still needs an explicit completed/failed job state
+rather than leaving trigger.json ambiguous after generation.
+
+================================================================================
+COMMUNICATION PROTOCOL
+================================================================================
+
+When the user says "check", ChatGPT inspects AI_HANDOFF_STATUS.txt,
+CLAUDE_WORK.txt, CHATGPT_WORK_LOG.txt, recent commits and relevant source/test
+changes, then continues the next assigned task automatically.
+
+================================================================================
+END OF CHATGPT WORK LOG
+================================================================================
+Last Updated: 2026-08-25 by ChatGPT
+Repository: CAption11/offlinemedia
+Branch: claude/scan-repo-chatgpt-review-6nljgh
+================================================================================

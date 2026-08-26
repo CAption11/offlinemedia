@@ -1,0 +1,12 @@
+{
+  "job_id": "d4af7da2-64cf-4954-b88f-95f8cd71150d",
+  "status": "queued",
+  "mode": "text_to_video",
+  "prompt": "A cat waving its tail, sitting on a wooden floor, natural lighting",
+  "width": 320,
+  "height": 240,
+  "frames": 17,
+  "fps": 8,
+  "created_at": "2026-08-24T17:43:36.675052+00:00",
+  "source": "manual_seed"
+}

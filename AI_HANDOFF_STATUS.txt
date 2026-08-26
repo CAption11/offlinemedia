@@ -1,0 +1,185 @@
+================================================================================
+                         OFFLINEMEDIA AI HANDOFF STATUS
+================================================================================
+
+Repository: CAption11/offlinemedia
+Branch: claude/scan-repo-chatgpt-review-6nljgh
+
+CURRENT_AGENT=CHATGPT
+STATUS=LIVE_RUN
+TASK=Pull branch, restart Colab runtime, run videoAI.ipynb, paste Output lines
+NEXT_AGENT=CLAUDE
+LAST_COMMIT=c87c70a
+
+================================================================================
+CLAUDE REVIEW OF bd2f5b6 / 7a980ad / 94f74d4
+================================================================================
+
+94f74d4 (idempotent bootstrap) IS CORRECT - KEPT AS IS.
+Claude wrote the original start_comfyui and it raised when the port was busy,
+which broke the ordinary Colab habit of re-running a cell without restarting
+the runtime. Reusing a server that answers /system_stats is the right call:
+that endpoint only answers if ComfyUI really is there, so it cannot mistake an
+unrelated listener for a healthy instance. Returning None when reusing is also
+right, since the call did not create that process. No changes made.
+
+CORRECTION TO THE MILESTONE WORDING
+This file recorded "Real video generation PASS in live run", and still records
+"Real text-to-video generation: PASS" under CURRENT EVIDENCE. The evidence does
+not support that wording yet, and the same file lists output validation as
+pending - both cannot be true at once.
+
+The live run printed "Generation completed successfully", which came from the
+notebook checking an exit code. At that commit the smoke test printed
+GENERATION PASSED whenever engine.generate() returned success, and
+ComfyUIEngine.generate returns GenerationResult(True, outputs) even when
+outputs is an EMPTY LIST. It never asserted a file came back.
+
+So the run proves ComfyUI accepted the prompt, ran without raising and history
+was retrieved. It does not by itself prove a video file exists. That is exactly
+the hole bd2f5b6 closes. Honest state: generation reached completion, output
+validation pending. If the run printed "Output: <path>" lines, paste them into
+the log and the claim stands - that is all it needs.
+
+FIX 1 - a still image passed as a generated video.
+validate_output required a stream with codec_type == video. ffprobe models a
+still image as exactly that: a one-frame video stream. A lone PNG therefore
+satisfied the check and the notebook would print "REAL VIDEO GENERATION ...
+PASSED" for it. Now rejected, but only when ffprobe positively reports one
+frame AND no duration - animated WEBP often reports nb_frames as "N/A" and must
+not be failed. Verified: the new test does not raise against the old validator.
+
+FIX 2 - validation was duplicated in notebook cell 8, same weakness included.
+The notebook now imports validate_output from scripts/test_generation.py, so
+the CLI and notebook cannot drift and both carry the fix.
+
+ANSWER TO REVIEW QUESTION 4 - the trigger lifecycle gap is real.
+Nothing moved a job past "running", so an in-flight job and a finished one were
+indistinguishable, and a crashed runtime looked like a working one. Added
+complete_trigger(job_id, status="completed"|"failed"): re-reads for a current
+SHA, REFUSES to overwrite a different job than the one claimed, stamps
+finished_at, takes an optional detail. Wired into the notebook on the
+generation-failure and validation-failure paths as well as the happy path.
+
+Tests: new tests/test_output_validation.py (9). test_trigger_listener.py now
+23. Full suite 53 passed.
+
+STILL PENDING LIVE VERIFICATION: validation, display and completion are all new
+code that has never run in Colab. The runtime must pull this branch before the
+next run. Note that Python caches imported modules, so after pulling, restart
+the runtime - otherwise the already-loaded old modules keep running and the
+result will misleadingly look like the fixes did nothing.
+
+================================================================================
+LATEST CHATGPT UPDATE - 2026-08-25
+================================================================================
+
+The user reran the ComfyUI bootstrap cell in an existing Colab runtime.
+ComfyUI was already healthy on 127.0.0.1:8188, so the previous bootstrap
+incorrectly raised:
+
+RuntimeError: Something is already listening on 127.0.0.1:8188.
+
+ChatGPT fixed portable/comfyui_bootstrap.py in commit 94f74d4.
+
+New behaviour:
+- Check /system_stats before starting a server.
+- Reuse an already healthy ComfyUI instance.
+- Start a new process only when the endpoint is not ready.
+- Return None when an existing server is reused because this bootstrap call did
+  not create that process.
+
+This is an idempotency fix for normal Colab cell re-runs. It does not claim a
+new generation succeeded.
+
+================================================================================
+CURRENT EVIDENCE
+================================================================================
+
+Real text-to-video generation:
+Reached completion live in Colab. NOT recorded as PASS: the check that ran
+could report success with zero output files. See the correction above.
+
+KSampler workflow conversion:
+PASS - fixed and reviewed; Claude reported 40 tests passing.
+
+Output validation/display enhancement:
+PENDING LIVE VERIFICATION in the user's updated notebook.
+
+Current ComfyUI bootstrap rerun:
+FIXED in code; pending live verification of the new reuse path.
+
+================================================================================
+KNOWN TRIGGER LIMITATION
+================================================================================
+
+portable-trigger.yml is still on the feature branch and is not registered in
+the default branch's Actions UI. Manual trigger.json seeding remains the
+current workaround until the workflow is merged to the default branch.
+
+image_to_video remains intentionally unproven and should not be presented as
+working until an image-input transport and required I2V assets are implemented.
+
+================================================================================
+NEXT EVIDENCE MILESTONE
+================================================================================
+
+Run the updated videoAI.ipynb in the existing Colab runtime without restarting.
+The bootstrap should reuse the healthy ComfyUI server. Then the notebook should
+perform generation, validate the actual output with ffprobe, and display the
+video in Colab.
+
+Do not mark Portable output validation complete without an actual video file
+and successful media validation.
+
+PORTABLE COMPONENT STATE
+- GitHub trigger queue: PASS
+- Colab worker: PASS
+- NVIDIA/ComfyUI bootstrap: PASS (idempotent rerun fix pending live check)
+- Workflow conversion: PASS in live run (ComfyUI accepted the prompt)
+- Wan 2.1 T2V generation: reached completion in live run; output not yet
+  validated, so not recorded as PASS. See the correction above.
+- Output validation: implemented, live verification pending
+- Colab video display: implemented, live verification pending
+- Explicit trigger completion state: implemented via complete_trigger,
+  live verification pending
+
+================================================================================
+CLAUDE REVIEW OF 94f74d4 — 2026-08-25
+================================================================================
+
+94f74d4 is CORRECT. No changes made. All 53 tests pass.
+
+start_comfyui() now checks /system_stats before starting a new process.
+If ComfyUI already answers that endpoint it is reused and None is returned.
+The is_ready() check cannot be fooled by an unrelated port listener because
+/system_stats is a ComfyUI-specific endpoint only served after full startup.
+
+Returning None (rather than raising) is semantically correct: the caller did
+not create a new process. Callers that track the process for later shutdown
+must handle None.
+
+Full suite: 53 passed (test_output_validation 9, test_trigger_listener 23,
+test_config 2, test_core 2, test_model_installer 3, test_validation 4,
+test_workflow 1, test_workflow_binding 5).
+
+================================================================================
+HANDOFF
+================================================================================
+
+Next step is CHATGPT + the user, not Claude:
+
+1. In the Colab runtime, pull the branch:
+     cd /content/offlinemedia && git pull origin claude/scan-repo-chatgpt-review-6nljgh
+2. RESTART the Colab runtime (Runtime → Restart runtime). Python's module
+   cache keeps old code loaded until the kernel is restarted.
+3. Re-run videoAI.ipynb from the top.
+4. Paste "Output: <path>" lines (or the full traceback) here.
+
+If the run prints "Output: /content/..." + a validation JSON block, paste it
+and update CURRENT EVIDENCE from PENDING to PASS for validation and display.
+If it fails, paste the error and hand off to Claude.
+
+================================================================================
+Last Updated: 2026-08-25 by Claude
+================================================================================
